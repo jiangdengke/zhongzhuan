@@ -11,40 +11,48 @@ const MESSAGE_LABELS = {
   listenQwen: {
     invalid_json: "JSON 解析失败",
     request_received: "收到请求",
-    branch_speech_context: "普通对话 -> DeepSeek",
-    branch_cmd: "命令请求 -> 固定回复",
-    response_ready: "响应完成",
+    branch_speech_context: "对话转发 DeepSeek",
+    branch_cmd: "命令固定回复",
+    response_ready: "返回响应",
     unknown_event: "未知事件",
   },
   deepseek: {
-    request_start: "DeepSeek 请求",
+    request_start: "请求 DeepSeek",
     api_key_missing: "DeepSeek 缺少 API Key",
-    response_received: "DeepSeek 响应",
+    response_received: "DeepSeek 已响应",
     request_failed_status: "DeepSeek 状态异常",
-    request_success: "DeepSeek 成功",
+    request_success: "DeepSeek 完成",
     request_exception: "DeepSeek 异常",
   },
 };
 
 const KEY_LABELS = {
   traceId: "trace",
-  requestId: "request",
+  requestId: "req",
   sessionId: "session",
   robotId: "robot",
   functionName: "function",
-  contentPreview: "text",
+  contentPreview: "user",
   functionParamPreview: "param",
   replyPreview: "reply",
   answerPreview: "answer",
-  answerLength: "answerLen",
-  hasApiKey: "apiKey",
+  answerLength: "chars",
+  returnedLength: "outChars",
+  chunkCount: "chunks",
+  hasFunctionParam: "hasParam",
+  hasApiKey: "key",
+  statusCode: "http",
   durationMs: "cost",
+  baseUrl: "upstream",
+  stream: "mode",
+  wasTruncated: "truncated",
 };
 
 const DETAIL_ORDER = [
   "traceId",
   "requestId",
   "sessionId",
+  "stream",
   "robotId",
   "status",
   "phase",
@@ -58,9 +66,13 @@ const DETAIL_ORDER = [
   "ok",
   "contentPreview",
   "functionParamPreview",
+  "hasFunctionParam",
   "replyPreview",
   "answerPreview",
   "answerLength",
+  "returnedLength",
+  "chunkCount",
+  "wasTruncated",
   "durationMs",
   "error",
 ];
@@ -142,6 +154,22 @@ function formatValue(key, value) {
     return `${value}ms`;
   }
 
+  if (key === "stream") {
+    return value ? "stream" : "json";
+  }
+
+  if (key === "hasApiKey") {
+    return value ? "yes" : "no";
+  }
+
+  if (key === "hasFunctionParam") {
+    return value ? "yes" : "no";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
   if (key === "traceId" || key === "requestId") {
     return shortenTrace(value);
   }
@@ -189,9 +217,9 @@ function formatDetails(details) {
 function formatPretty(record) {
   const { ts, level, scope, message, ...details } = record;
   const detailText = formatDetails(details);
-  const line = `${formatTimestamp(new Date(ts))} ${level.toUpperCase()} [${scope}] ${readableMessage(scope, message)}`;
+  const line = `${formatTimestamp(new Date(ts))} ${level.toUpperCase().padEnd(5)} [${scope}] ${readableMessage(scope, message)}`;
 
-  return detailText ? `${line} ${detailText}` : line;
+  return detailText ? `${line} | ${detailText}` : line;
 }
 
 function emit(level, scope, message, details = {}) {
