@@ -102,12 +102,86 @@ function getUpstreamConversationKey(event, data) {
   return data.traceId || data.sessionId || event?.id || `upstream-${Date.now()}`;
 }
 
-function createUpstreamInputContent(event, data) {
-  if (data.event === "CMD") {
-    return summarizeMonitorEvent("final_input", event) || "上游命令已收到";
+function readText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function parseJsonObject(value) {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value;
   }
 
-  return data.content || "上游输入已收到";
+  if (typeof value !== "string" || !value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+    return {};
+  }
+
+  return {};
+}
+
+function parseCommandParam(data) {
+  const param = parseJsonObject(data.functionParam);
+
+  if (data.functionName !== "WEATHER") {
+    return param;
+  }
+
+  if (typeof param.msg === "string") {
+    return parseJsonObject(param.msg);
+  }
+
+  if (typeof param.msg === "object" && param.msg !== null && !Array.isArray(param.msg)) {
+    return param.msg;
+  }
+
+  return param;
+}
+
+function createCommandInputContent(data) {
+  const param = parseCommandParam(data);
+
+  if (data.functionName === "FLIGHT") {
+    const flightNo = readText(param.flightNo).toUpperCase();
+    return flightNo ? `查询 ${flightNo} 航班` : "查询航班";
+  }
+
+  if (data.functionName === "FINDING_PLACES") {
+    const placeName = readText(param.placeName);
+    return placeName ? `带我去${placeName}` : "引领到指定地点";
+  }
+
+  if (data.functionName === "INTRODUCING_PLACES") {
+    const placeName = readText(param.placeName);
+    return placeName ? `介绍${placeName}` : "介绍场所";
+  }
+
+  if (data.functionName === "WEATHER") {
+    const city = readText(param.city) || readText(param.cityName) || readText(param.name);
+    return city ? `查询${city}天气` : "查询天气";
+  }
+
+  if (data.functionName === "ACCESS") {
+    return "扫码通行";
+  }
+
+  return data.functionName ? `执行${data.functionName}命令` : "上游命令已收到";
+}
+
+function createUpstreamInputContent(event, data, chat) {
+  if (data.event === "CMD") {
+    return chat?.latestAsrContent || createCommandInputContent(data) || summarizeMonitorEvent("final_input", event);
+  }
+
+  return data.content || chat?.latestAsrContent || "上游输入已收到";
 }
 
 function createAsrPartialContent(data) {
@@ -164,6 +238,7 @@ export function RobotConsolePage() {
         upstreamChatsRef.current[key] = {
           userMessageId: "",
           assistantMessageId: "",
+          latestAsrContent: "",
         };
       }
 
@@ -209,12 +284,13 @@ export function RobotConsolePage() {
       const chat = getUpstreamChat(key);
 
       if (eventName === "asr_partial") {
+        chat.latestAsrContent = readText(data.content) || chat.latestAsrContent;
         upsertUpstreamUserMessage(chat, createAsrPartialContent(data));
         return;
       }
 
       if (eventName === "final_input") {
-        upsertUpstreamUserMessage(chat, createUpstreamInputContent(event, data));
+        upsertUpstreamUserMessage(chat, createUpstreamInputContent(event, data, chat));
         ensureUpstreamAssistantMessage(chat);
         return;
       }
