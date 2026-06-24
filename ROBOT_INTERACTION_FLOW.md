@@ -6,8 +6,9 @@
 
 - `POST /robot/voiceMonitor`
 - `POST /robot/listenQwen`
+- `POST /robot/listenQwen/stream`（可选，大模型流式返回）
 
-> `/robot/listenQwen/stream` 仅用于 Web 调试台,不是上游机器人客户端的正式联调接口。
+> 普通 TTS 播放继续使用 `/robot/listenQwen`；如果上游需要边生成边接收大模型文本，使用 `/robot/listenQwen/stream`。
 
 ---
 
@@ -23,8 +24,8 @@
   -> 用户说话结束
   -> 上报结束状态
   -> 客户端得到最终文本或命令
-  -> 调用 /robot/listenQwen
-  -> 中转服务返回 TTS 文案
+  -> 调用 /robot/listenQwen 或 /robot/listenQwen/stream
+  -> 中转服务返回完整 TTS 文案，或通过 SSE 流式返回 start/delta/done
   -> 客户端播放 TTS
 ```
 
@@ -66,6 +67,10 @@ status="0"
    │    POST /robot/listenQwen event="SPEECH_CONTEXT"
    │       -> 中转服务调用 DeepSeek
    │       -> 返回 RESPONSE_CONTEXT
+   │
+   │    或 POST /robot/listenQwen/stream event="SPEECH_CONTEXT"
+   │       -> 中转服务调用 DeepSeek
+   │       -> SSE 返回 start -> delta -> done
    │
    └─ 命令调用:
         POST /robot/listenQwen event="CMD"
@@ -375,9 +380,9 @@ SPEECH_CONTEXT / CMD             sessionId: test-session-001
 
 ---
 
-## 12. Web 调试台和正式接口的区别
+## 12. 普通接口、流式接口和 Web 调试台的区别
 
-当前 Web 调试台调用的是:
+Web 调试台和需要大模型流的上游客户端都可以调用:
 
 ```http
 POST /robot/listenQwen/stream
@@ -390,7 +395,7 @@ POST /robot/listenQwen/stream
 输出: SSE 流式返回
 ```
 
-上游机器人客户端正式联调用的是:
+普通上游机器人客户端调用的是:
 
 ```http
 POST /robot/voiceMonitor
@@ -409,8 +414,9 @@ POST /robot/listenQwen
 | 场景 | 输入 | 输出 |
 |---|---|---|
 | 上游正式接口 `SPEECH_CONTEXT` | 一次性 JSON | 一次性 JSON |
+| 上游可选流式接口 `SPEECH_CONTEXT` | 一次性 JSON | SSE `start -> delta -> done` |
 | 上游 `ASR_PARTIAL` | 多次 POST | HTTP 200 |
-| Web 调试台 `/stream` | 一次性 JSON | SSE 流式 |
+| Web 调试台 `/stream` | 一次性 JSON | SSE `start -> delta -> done` |
 | 真正音频流 / WebSocket 双向流 | 当前没有 | 当前没有 |
 
 ---

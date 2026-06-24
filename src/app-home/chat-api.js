@@ -130,7 +130,7 @@ export async function sendChatMessageStream(content, handlers = {}) {
         buffer = buffer.slice(separatorIndex + 2);
         const parsed = parseSseBlock(block);
 
-        if (parsed?.event === "meta") {
+        if (parsed?.event === "start" || parsed?.event === "meta") {
           streamTraceId = parsed.data?.traceId || streamTraceId;
           handlers.onMeta?.(parsed.data);
         }

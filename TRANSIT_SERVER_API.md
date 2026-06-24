@@ -20,6 +20,7 @@
 | 端点 | 用途 | 方向 |
 |------|------|------|
 | `POST /robot/listenQwen` | 对话和命令分发的核心接口 | 客户端 → 中转服务 → 业务后端 → 客户端 |
+| `POST /robot/listenQwen/stream` | 大模型流式返回接口（可选） | 客户端 → 中转服务 → DeepSeek → 客户端 |
 | `POST /robot/voiceMonitor` | 客户端上报语音状态 | 客户端 → 中转服务(通常无需返回内容) |
 
 ### 1.2 客户端基础信息
@@ -56,7 +57,7 @@ Content-Type: application/json; charset=utf-8
 |---------|------|---------|
 | `SPEECH_CONTEXT` | 用户语音对话 | 用户随意聊天,LLM 没识别到具体意图 |
 | `CMD` | 命令调用 | LLM 把用户语音识别为具体功能(如查航班、查天气、引领等) |
-| `ASR_PARTIAL` | ASR 识别中间结果 | 用户说话过程中,ASR 流式输出的未定稿文本(见 [2.9](#29-asr_partial-中间结果上报)) |
+| `ASR_PARTIAL` | ASR 识别中间结果 | 用户说话过程中,ASR 流式输出的未定稿文本(见 [2.10](#210-asr_partial-中间结果上报)) |
 | `RESPONSE_CONTEXT` | (保留,目前未使用) | — |
 
 ### 2.4 `function` 字段
@@ -215,7 +216,80 @@ Content-Type: application/json; charset=utf-8
 
 如果 `content` 字段缺失,客户端会用默认兜底:`"模型返回无效，您可以尝试重新对我说"`。
 
-### 2.8 WEATHER 参数详细说明
+### 2.8 流式响应接口: `/robot/listenQwen/stream`
+
+当客户端需要边生成边接收大模型文本时，可以调用流式接口:
+
+```http
+POST {base_url}/robot/listenQwen/stream
+Content-Type: application/json; charset=utf-8
+Accept: text/event-stream
+```
+
+请求体与 `/robot/listenQwen` 完全相同。服务端响应为 SSE:
+
+```http
+Content-Type: text/event-stream; charset=utf-8
+```
+
+#### 事件顺序
+
+```text
+start -> delta -> delta -> ... -> done
+```
+
+异常时可能出现:
+
+```text
+start -> error -> done
+```
+
+#### `start` 开始事件
+
+```text
+event: start
+data: {"traceId":"...","robotId":"4","event":"RESPONSE_CONTEXT","sourceEvent":"SPEECH_CONTEXT","sessionId":"..."}
+```
+
+表示本轮流式响应开始。
+
+#### `delta` 分片事件
+
+```text
+event: delta
+data: {"content":"您好","chunkIndex":1,"sourceEvent":"SPEECH_CONTEXT"}
+```
+
+`content` 是本次新增文本，客户端需要自行累加。
+
+#### `done` 结束事件
+
+```text
+event: done
+data: {"robotId":"4","event":"RESPONSE_CONTEXT","content":"完整TTS文本","traceId":"...","sourceEvent":"SPEECH_CONTEXT","chunkCount":12}
+```
+
+`content` 是完整文本，可用于最终校准。
+
+#### `error` 错误事件
+
+```text
+event: error
+data: {"robotId":"4","event":"RESPONSE_CONTEXT","content":"抱歉，系统暂时无法处理这个请求，请稍后再试。"}
+```
+
+客户端收到 `error` 后仍应继续读取到 `done` 或连接结束。
+
+#### 处理规则
+
+| 请求类型 | 流式接口行为 |
+|---|---|
+| `SPEECH_CONTEXT` 普通对话 | 请求 DeepSeek，按 `delta` 流式返回 |
+| `CMD` 命令 | 不请求 DeepSeek，返回一条命令文案 `delta` 后 `done` |
+| `ASR_PARTIAL` | 不请求 DeepSeek，直接 `done` |
+| 明显航班查询的 `SPEECH_CONTEXT` | 自动按 `FLIGHT` 命令处理，不请求 DeepSeek |
+
+### 2.9 WEATHER 参数详细说明
 
 天气查询比较特殊。**客户端先调本地天气服务**,把结果再传给中转服务做 TTS 文案生成:
 
@@ -242,7 +316,7 @@ POST /robot/listenQwen (event=CMD, function.name=WEATHER, function.param=...)
 
 **中转服务侧的处理:** 解析 `function.param` 里的 `msg` 字段(双层 JSON 字符串),根据天气数据生成播报文本。
 
-### 2.9 `ASR_PARTIAL` 中间结果上报
+### 2.10 `ASR_PARTIAL` 中间结果上报
 
 用户说话过程中,ASR 会**流式**输出尚未定稿的识别文本。客户端把这些**中间结果**通过 `event=ASR_PARTIAL` 实时发给后端,用于业务侧感知"用户正在说什么"。
 

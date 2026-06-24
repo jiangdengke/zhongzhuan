@@ -1,6 +1,7 @@
 import { getDeepSeekReplyStream } from "@/integrations/deepseek/client.js";
 import { logError, logInfo, makeTraceId, previewText } from "@/shared/logging/logger.js";
 import { DEFAULT_ROBOT_ID, ROBOT_EVENTS, ROBOT_REPLIES } from "../domain/constants.js";
+import { detectFlightCommand, readCommandSession, rememberCommandSession } from "./command-session.js";
 import { createCommandReply } from "./command-replies.js";
 import { createAcceptedPayload, createResponsePayload, normalizeListenPayload } from "./listen-request.js";
 
@@ -14,6 +15,15 @@ export function createInvalidListenStreamResult({ requestId = makeTraceId("liste
   return {
     traceId: requestId,
     events: [
+      {
+        type: "start",
+        data: {
+          traceId: requestId,
+          robotId: DEFAULT_ROBOT_ID,
+          event: ROBOT_EVENTS.responseContext,
+          sourceEvent: "INVALID_JSON",
+        },
+      },
       {
         type: "error",
         data: createResponsePayload(DEFAULT_ROBOT_ID, ROBOT_REPLIES.invalidJson),
@@ -47,15 +57,97 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
   });
 
   yield {
-    type: "meta",
+    type: "start",
     data: {
       traceId: request.traceId,
       robotId: request.robotId,
       event: ROBOT_EVENTS.responseContext,
+      sourceEvent: request.event,
+      sessionId: request.sessionId,
     },
   };
 
   if (request.event === ROBOT_EVENTS.speechContext) {
+    const cachedCommand = readCommandSession(request.sessionId);
+
+    if (cachedCommand) {
+      logInfo("listenQwen", "skip_speech_after_cmd", {
+        traceId: request.traceId,
+        sessionId: request.sessionId,
+        robotId: request.robotId,
+        functionName: cachedCommand.functionName,
+        durationMs: Date.now() - startedAt,
+        replyPreview: previewText(cachedCommand.reply, 120),
+        stream: true,
+      });
+
+      yield {
+        type: "delta",
+        data: {
+          content: cachedCommand.reply,
+          chunkIndex: 1,
+          sourceEvent: ROBOT_EVENTS.command,
+          functionName: cachedCommand.functionName,
+        },
+      };
+      yield {
+        type: "done",
+        data: {
+          ...createResponsePayload(request.robotId, cachedCommand.reply),
+          traceId: request.traceId,
+          sourceEvent: ROBOT_EVENTS.command,
+          functionName: cachedCommand.functionName,
+          skippedEvent: request.event,
+          chunkCount: 1,
+        },
+      };
+      return;
+    }
+
+    const detectedCommand = detectFlightCommand(request.content);
+
+    if (detectedCommand) {
+      const commandRequest = {
+        ...request,
+        event: ROBOT_EVENTS.command,
+        functionName: detectedCommand.functionName,
+        functionParam: detectedCommand.functionParam,
+      };
+      const commandReply = createCommandReply(commandRequest);
+      rememberCommandSession(commandRequest, commandReply);
+
+      logInfo("listenQwen", "redirect_speech_to_cmd", {
+        traceId: request.traceId,
+        sessionId: request.sessionId,
+        robotId: request.robotId,
+        functionName: commandRequest.functionName,
+        durationMs: Date.now() - startedAt,
+        replyPreview: previewText(commandReply.reply, 120),
+        stream: true,
+      });
+
+      yield {
+        type: "delta",
+        data: {
+          content: commandReply.reply,
+          chunkIndex: 1,
+          sourceEvent: ROBOT_EVENTS.command,
+          functionName: commandRequest.functionName,
+        },
+      };
+      yield {
+        type: "done",
+        data: {
+          ...createResponsePayload(request.robotId, commandReply.reply),
+          traceId: request.traceId,
+          sourceEvent: ROBOT_EVENTS.command,
+          functionName: commandRequest.functionName,
+          chunkCount: 1,
+        },
+      };
+      return;
+    }
+
     let reply = "";
     let chunkCount = 0;
 
@@ -69,6 +161,8 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
         type: "delta",
         data: {
           content: chunk,
+          chunkIndex: chunkCount,
+          sourceEvent: request.event,
         },
       };
     }
@@ -86,7 +180,12 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
 
     yield {
       type: "done",
-      data: createResponsePayload(request.robotId, reply),
+      data: {
+        ...createResponsePayload(request.robotId, reply),
+        traceId: request.traceId,
+        sourceEvent: request.event,
+        chunkCount,
+      },
     };
     return;
   }
@@ -111,6 +210,7 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
 
   if (request.event === ROBOT_EVENTS.command) {
     const commandReply = createCommandReply(request);
+    rememberCommandSession(request, commandReply);
 
     logInfo("listenQwen", "branch_cmd", {
       traceId: request.traceId,
@@ -127,11 +227,20 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
       type: "delta",
       data: {
         content: commandReply.reply,
+        chunkIndex: 1,
+        sourceEvent: request.event,
+        functionName: request.functionName,
       },
     };
     yield {
       type: "done",
-      data: createResponsePayload(request.robotId, commandReply.reply),
+      data: {
+        ...createResponsePayload(request.robotId, commandReply.reply),
+        traceId: request.traceId,
+        sourceEvent: request.event,
+        functionName: request.functionName,
+        chunkCount: 1,
+      },
     };
     return;
   }
