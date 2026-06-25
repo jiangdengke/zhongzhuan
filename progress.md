@@ -17,3 +17,20 @@
 - `UPSTREAM_TEST_GUIDE.md`: added curl and Python examples for the streaming interface.
 - `ROBOT_INTERACTION_FLOW.md`: updated the end-to-end flow to include the optional streaming branch.
 - Rollback: revert the commit that contains these files, or restore the previous `/robot/listenQwen/stream` behavior by changing the first SSE event back to `meta` and removing the stream-interface documentation sections.
+
+## 2026-06-25 - Task: show upstream stream responses in the web console
+### What was done
+- Mirrored `/robot/listenQwen/stream` processing into the browser event channel so upstream stream calls appear in the left chat area as live incremental output.
+- Kept web-console-originated `web-chat-*` sessions from being duplicated by the upstream mirror while preserving the monitor feed.
+- Documented that opening the web console while calling the stream endpoint shows `delta` output live in the chat area.
+
+### Testing
+- `npm run build` passed.
+- IDE diagnostics reported no errors for the touched application files.
+
+### Notes
+- `src/features/robot/application/listen-qwen-stream.js`: publishes stream lifecycle events to the page event bus while returning SSE to the upstream caller.
+- `src/app-home/robot-console-page.js`: ignores mirrored `web-chat-*` sessions in the left chat to avoid duplicate local debug messages.
+- `UPSTREAM_TEST_GUIDE.md`: notes that `/robot/listenQwen/stream` can be watched live in the web console.
+- `progress.md`: appended this implementation and verification note.
+- Rollback: revert this entry's file changes, or remove the stream-path `publishRobotEvent` calls and the `web-chat-*` duplicate filter.

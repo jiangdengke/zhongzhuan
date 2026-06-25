@@ -188,6 +188,10 @@ function createAsrPartialContent(data) {
   return data.content ? `正在识别：${data.content}` : "正在识别...";
 }
 
+function isWebConsoleSession(data) {
+  return typeof data.sessionId === "string" && data.sessionId.startsWith("web-chat-");
+}
+
 const initialMonitorState = {
   traceId: "",
   voiceStatus: "",
@@ -278,6 +282,10 @@ export function RobotConsolePage() {
       }
 
       if (!["asr_partial", "final_input", "deepseek_delta", "tts_done", "robot_error"].includes(eventName)) {
+        return;
+      }
+
+      if (isWebConsoleSession(data)) {
         return;
       }
 

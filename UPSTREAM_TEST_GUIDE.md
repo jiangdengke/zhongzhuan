@@ -398,6 +398,7 @@ data: {"robotId":"4","event":"RESPONSE_CONTEXT","content":"抱歉，系统暂时
 ### 4.2 curl 测试普通对话流
 
 > `-N` 表示关闭 curl 输出缓冲，便于实时看到 `delta`。
+> 如果同时打开 `http://127.0.0.1:4000`，上游调用 `/robot/listenQwen/stream` 的内容也会在左侧聊天区按 `delta` 流式追加显示。
 
 ```bash
 curl -N -X POST "$BASE_URL/robot/listenQwen/stream" \

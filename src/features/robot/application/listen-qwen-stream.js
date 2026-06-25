@@ -4,6 +4,7 @@ import { DEFAULT_ROBOT_ID, ROBOT_EVENTS, ROBOT_REPLIES } from "../domain/constan
 import { detectFlightCommand, readCommandSession, rememberCommandSession } from "./command-session.js";
 import { createCommandReply } from "./command-replies.js";
 import { createAcceptedPayload, createResponsePayload, normalizeListenPayload } from "./listen-request.js";
+import { publishRobotEvent } from "./robot-events.js";
 
 export function createInvalidListenStreamResult({ requestId = makeTraceId("listen_stream"), startedAt = Date.now() } = {}) {
   logError("listenQwen", "invalid_json", {
@@ -71,6 +72,18 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
     const cachedCommand = readCommandSession(request.sessionId);
 
     if (cachedCommand) {
+      publishRobotEvent("tts_done", {
+        traceId: request.traceId,
+        sessionId: request.sessionId,
+        robotId: request.robotId,
+        event: ROBOT_EVENTS.responseContext,
+        sourceEvent: ROBOT_EVENTS.command,
+        functionName: cachedCommand.functionName,
+        content: cachedCommand.reply,
+        skippedEvent: request.event,
+        durationMs: Date.now() - startedAt,
+      });
+
       logInfo("listenQwen", "skip_speech_after_cmd", {
         traceId: request.traceId,
         sessionId: request.sessionId,
@@ -116,6 +129,18 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
       const commandReply = createCommandReply(commandRequest);
       rememberCommandSession(commandRequest, commandReply);
 
+      publishRobotEvent("final_input", {
+        traceId: request.traceId,
+        requestId,
+        robotId: request.robotId,
+        event: ROBOT_EVENTS.command,
+        language: request.language,
+        sessionId: request.sessionId,
+        functionName: commandRequest.functionName,
+        functionParam: commandRequest.functionParam,
+        content: request.content,
+      });
+
       logInfo("listenQwen", "redirect_speech_to_cmd", {
         traceId: request.traceId,
         sessionId: request.sessionId,
@@ -145,8 +170,28 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
           chunkCount: 1,
         },
       };
+      publishRobotEvent("tts_done", {
+        traceId: request.traceId,
+        sessionId: request.sessionId,
+        robotId: request.robotId,
+        event: ROBOT_EVENTS.responseContext,
+        sourceEvent: ROBOT_EVENTS.command,
+        functionName: commandRequest.functionName,
+        content: commandReply.reply,
+        durationMs: Date.now() - startedAt,
+      });
       return;
     }
+
+    publishRobotEvent("final_input", {
+      traceId: request.traceId,
+      requestId,
+      robotId: request.robotId,
+      event: request.event,
+      language: request.language,
+      sessionId: request.sessionId,
+      content: request.content,
+    });
 
     let reply = "";
     let chunkCount = 0;
@@ -165,6 +210,14 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
           sourceEvent: request.event,
         },
       };
+      publishRobotEvent("deepseek_delta", {
+        traceId: request.traceId,
+        sessionId: request.sessionId,
+        robotId: request.robotId,
+        sourceEvent: request.event,
+        content: chunk,
+        chunkIndex: chunkCount,
+      });
     }
 
     logInfo("listenQwen", "response_ready", {
@@ -187,10 +240,29 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
         chunkCount,
       },
     };
+    publishRobotEvent("tts_done", {
+      traceId: request.traceId,
+      sessionId: request.sessionId,
+      robotId: request.robotId,
+      event: ROBOT_EVENTS.responseContext,
+      sourceEvent: request.event,
+      content: reply,
+      chunkCount,
+      durationMs: Date.now() - startedAt,
+    });
     return;
   }
 
   if (request.event === ROBOT_EVENTS.asrPartial) {
+    publishRobotEvent("asr_partial", {
+      traceId: request.traceId,
+      requestId,
+      robotId: request.robotId,
+      language: request.language,
+      sessionId: request.sessionId,
+      content: request.content,
+    });
+
     logInfo("listenQwen", "asr_partial_received", {
       traceId: request.traceId,
       sessionId: request.sessionId,
@@ -209,6 +281,18 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
   }
 
   if (request.event === ROBOT_EVENTS.command) {
+    publishRobotEvent("final_input", {
+      traceId: request.traceId,
+      requestId,
+      robotId: request.robotId,
+      event: request.event,
+      language: request.language,
+      sessionId: request.sessionId,
+      functionName: request.functionName,
+      functionParam: request.functionParam,
+      content: request.content,
+    });
+
     const commandReply = createCommandReply(request);
     rememberCommandSession(request, commandReply);
 
@@ -242,6 +326,16 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
         chunkCount: 1,
       },
     };
+    publishRobotEvent("tts_done", {
+      traceId: request.traceId,
+      sessionId: request.sessionId,
+      robotId: request.robotId,
+      event: ROBOT_EVENTS.responseContext,
+      sourceEvent: request.event,
+      functionName: request.functionName,
+      content: commandReply.reply,
+      durationMs: Date.now() - startedAt,
+    });
     return;
   }
 
@@ -258,6 +352,14 @@ export async function* streamListenQwen(payload, options = {}, dependencies = {}
     type: "error",
     data: createResponsePayload(request.robotId, ROBOT_REPLIES.unknownEvent),
   };
+  publishRobotEvent("robot_error", {
+    traceId: request.traceId,
+    sessionId: request.sessionId,
+    robotId: request.robotId,
+    event: request.event,
+    reason: "unknown_event",
+    message: ROBOT_REPLIES.unknownEvent,
+  });
   yield {
     type: "done",
     data: createResponsePayload(request.robotId, ROBOT_REPLIES.unknownEvent),
