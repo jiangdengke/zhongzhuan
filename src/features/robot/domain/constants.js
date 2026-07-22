@@ -11,6 +11,7 @@ export const ROBOT_FUNCTIONS = {
   introducingPlaces: "INTRODUCING_PLACES",
   findingPlaces: "FINDING_PLACES",
   flight: "FLIGHT",
+  boardingGate: "BOARDING_GATE",
   access: "ACCESS",
   weather: "WEATHER",
 };

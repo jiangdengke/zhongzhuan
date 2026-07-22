@@ -168,6 +168,34 @@ curl -X POST http://127.0.0.1:4000/robot/listenQwen \
 }
 ```
 
+查询登机口命令不会调用 DeepSeek:
+
+```bash
+curl -X POST http://127.0.0.1:4000/robot/listenQwen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "robotId":"4",
+    "event":"CMD",
+    "language":"CN",
+    "content":"",
+    "sessionId":"test-session-boarding-gate-001",
+    "function":{
+      "name":"BOARDING_GATE",
+      "param":"{\"gateNo\":\"401\"}"
+    }
+  }'
+```
+
+期望响应:
+
+```json
+{
+  "robotId": "4",
+  "event": "RESPONSE_CONTEXT",
+  "content": "正在为您查询401登机口，请稍等。"
+}
+```
+
 ## 6. 日志查看
 
 默认日志是便于人工阅读的格式,可以直接看启动服务的终端。

@@ -52,3 +52,28 @@
 - `progress.md`: appended this implementation and verification note.
 - `.trellis/tasks/07-22-customer-facing-chat-ui/prd.md`: recorded scope and acceptance criteria for this task.
 - Rollback: restore the previous `robot-console-page.js` and `app/layout.js` versions; backend streaming and `/robot/events` behavior are unchanged.
+
+## 2026-07-22 - Task: add BOARDING_GATE command
+### What was done
+- Added the `BOARDING_GATE` command and parsed its JSON-string parameter `gateNo`.
+- Returned the fixed TTS text `正在为您查询{gateNo}登机口，请稍等。` for valid commands, with existing invalid-parameter handling for malformed input.
+- Reused the existing command path for both JSON and SSE endpoints, so the command does not request DeepSeek.
+- Updated the protocol, upstream test, and request example documents with JSON and streaming examples.
+
+### Testing
+- JSON endpoint returned `正在为您查询401登机口，请稍等。` for `BOARDING_GATE + {"gateNo":"401"}`.
+- JSON endpoint returned the existing parameter error for a missing `gateNo`.
+- SSE endpoint returned `start -> delta -> done`; both stream assertions and the fixed reply passed.
+- Server logs confirmed the command fixed-reply path without a DeepSeek request.
+- `npm run build` passed.
+- IDE diagnostics reported no errors for the touched application files.
+
+### Notes
+- `src/features/robot/domain/constants.js`: added the `BOARDING_GATE` function constant.
+- `src/features/robot/application/command-replies.js`: added gate parameter parsing and fixed reply generation.
+- `src/app-home/robot-console-page.js`: rendered upstream boarding-gate commands as natural-language input.
+- `TRANSIT_SERVER_API.md`: documented the function and payload example.
+- `UPSTREAM_TEST_GUIDE.md`: added JSON and SSE test commands and acceptance coverage.
+- `REQUEST_EXAMPLES.md`: added a JSON endpoint request example.
+- `progress.md`: appended this implementation and verification note.
+- Rollback: revert the changes in the listed source and documentation files; existing commands and stream protocol remain unchanged.

@@ -152,6 +152,22 @@ function createFlightReply(functionParam) {
   return { ok: true, reply: `正在为您查询${flightNo}航班动态，请稍等。` };
 }
 
+function createBoardingGateReply(functionParam) {
+  const parsed = parseJsonObject(functionParam);
+
+  if (!parsed.ok) {
+    return { ok: false, reply: ROBOT_REPLIES.invalidCommandParam };
+  }
+
+  const gateNo = readString(parsed.data.gateNo);
+
+  if (!gateNo) {
+    return { ok: false, reply: ROBOT_REPLIES.invalidCommandParam };
+  }
+
+  return { ok: true, reply: `正在为您查询${gateNo}登机口，请稍等。` };
+}
+
 export function createCommandReply(request) {
   switch (request.functionName) {
     case ROBOT_FUNCTIONS.introducingPlaces:
@@ -160,6 +176,8 @@ export function createCommandReply(request) {
       return createPlaceReply(request.functionParam, ROBOT_FUNCTIONS.findingPlaces);
     case ROBOT_FUNCTIONS.flight:
       return createFlightReply(request.functionParam);
+    case ROBOT_FUNCTIONS.boardingGate:
+      return createBoardingGateReply(request.functionParam);
     case ROBOT_FUNCTIONS.access:
       return { ok: true, reply: "请出示通行二维码，我来协助您扫码通行。" };
     case ROBOT_FUNCTIONS.weather:

@@ -281,7 +281,43 @@ curl -i -X POST "$BASE_URL/robot/listenQwen" \
 
 ---
 
-### 3.4 扫码通行: `ACCESS`
+### 3.4 登机口查询: `BOARDING_GATE`
+
+```bash
+curl -i -X POST "$BASE_URL/robot/listenQwen" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "robotId":"4",
+    "event":"CMD",
+    "language":"CN",
+    "content":"",
+    "sessionId":"test-session-boarding-gate-001",
+    "function":{
+      "name":"BOARDING_GATE",
+      "param":"{\"gateNo\":\"401\"}"
+    }
+  }'
+```
+
+期望响应:
+
+```json
+{
+  "robotId": "4",
+  "event": "RESPONSE_CONTEXT",
+  "content": "正在为您查询401登机口，请稍等。"
+}
+```
+
+说明:
+
+- 不调用 DeepSeek
+- `function.param` 必须是 JSON 字符串
+- 参数缺失或 JSON 无效时返回命令参数错误文案
+
+---
+
+### 3.5 扫码通行: `ACCESS`
 
 ```bash
 curl -i -X POST "$BASE_URL/robot/listenQwen" \
@@ -311,7 +347,7 @@ curl -i -X POST "$BASE_URL/robot/listenQwen" \
 
 ---
 
-### 3.5 天气查询: `WEATHER`
+### 3.6 天气查询: `WEATHER`
 
 `WEATHER` 的 `function.param` 是 JSON 字符串,其中 `msg` 也是 JSON 字符串。
 
@@ -460,7 +496,32 @@ curl -N -X POST "$BASE_URL/robot/listenQwen/stream" \
 正在为您查询CA1725航班动态，请稍等。
 ```
 
-### 4.4 Python 读取示例
+### 4.4 curl 测试登机口命令流
+
+```bash
+curl -N -X POST "$BASE_URL/robot/listenQwen/stream" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "robotId":"4",
+    "event":"CMD",
+    "language":"CN",
+    "content":"",
+    "sessionId":"test-stream-boarding-gate-001",
+    "function":{
+      "name":"BOARDING_GATE",
+      "param":"{\"gateNo\":\"401\"}"
+    }
+  }'
+```
+
+期望 `delta.data.content` 和 `done.data.content` 都是:
+
+```text
+正在为您查询401登机口，请稍等。
+```
+
+### 4.5 Python 读取示例
 
 ```python
 import json
@@ -508,6 +569,7 @@ with requests.post(url, json=payload, stream=True, timeout=30) as response:
 | 引领命令 | `CMD + FINDING_PLACES` | 返回引领文案 |
 | 介绍命令 | `CMD + INTRODUCING_PLACES` | 返回介绍文案 |
 | 航班命令 | `CMD + FLIGHT` | 返回航班查询文案 |
+| 登机口命令 | `CMD + BOARDING_GATE` | 返回登机口查询文案 |
 | 扫码命令 | `CMD + ACCESS` | 返回扫码文案 |
 | 天气命令 | `CMD + WEATHER` | 返回天气播报文案 |
 | 流式普通对话 | `/robot/listenQwen/stream`, `SPEECH_CONTEXT` | `start -> delta -> done` |

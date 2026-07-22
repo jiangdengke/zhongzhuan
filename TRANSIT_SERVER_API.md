@@ -74,6 +74,7 @@ Content-Type: application/json; charset=utf-8
 | `INTRODUCING_PLACES` | 介绍场所 | JSON 字符串,含 `placeName`(标准化后的中文地名) |
 | `FINDING_PLACES` | 引领到指定地点 | 同上,且地名集合多含洗手间、母婴室 |
 | `FLIGHT` | 查询航班动态 | JSON 字符串,含 `flightNo`(标准化后的 IATA 码,如 `CA123`) |
+| `BOARDING_GATE` | 查询登机口 | JSON 字符串,含 `gateNo`(如 `401`) |
 | `ACCESS` | 扫码 / 通行 | `null`(无参数) |
 | `WEATHER` | 天气查询 | JSON 字符串,见 [天气接口](#28-weather-参数详细说明) |
 
@@ -143,7 +144,29 @@ Content-Type: application/json; charset=utf-8
 }
 ```
 
-#### (5) 扫码(`CMD` + `ACCESS`)
+#### (5) 登机口查询(`CMD` + `BOARDING_GATE`)
+
+```json
+{
+  "robotId": "4",
+  "event": "CMD",
+  "language": "CN",
+  "content": "",
+  "sessionId": "8f3e2a4b-...",
+  "function": {
+    "name": "BOARDING_GATE",
+    "param": "{\"gateNo\":\"401\"}"
+  }
+}
+```
+
+固定返回:
+
+```text
+正在为您查询401登机口，请稍等。
+```
+
+#### (6) 扫码(`CMD` + `ACCESS`)
 
 ```json
 {
@@ -159,7 +182,7 @@ Content-Type: application/json; charset=utf-8
 }
 ```
 
-#### (6) 天气查询(`CMD` + `WEATHER`)
+#### (7) 天气查询(`CMD` + `WEATHER`)
 
 ```json
 {

@@ -89,6 +89,11 @@ function createCommandInputContent(data) {
     return flightNo ? `查询 ${flightNo} 航班` : "查询航班";
   }
 
+  if (data.functionName === "BOARDING_GATE") {
+    const gateNo = readText(param.gateNo);
+    return gateNo ? `查询 ${gateNo} 登机口` : "查询登机口";
+  }
+
   if (data.functionName === "FINDING_PLACES") {
     const placeName = readText(param.placeName);
     return placeName ? `带我去${placeName}` : "引领到指定地点";
