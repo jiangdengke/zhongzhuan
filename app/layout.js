@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "Transit Server",
-  description: "Robot transit service API",
+  title: "机场智能服务助手",
+  description: "提供航班查询、路线指引和天气信息的智能服务助手",
 };
 
 export default function RootLayout({ children }) {

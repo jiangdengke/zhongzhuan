@@ -34,3 +34,21 @@
 - `UPSTREAM_TEST_GUIDE.md`: notes that `/robot/listenQwen/stream` can be watched live in the web console.
 - `progress.md`: appended this implementation and verification note.
 - Rollback: revert this entry's file changes, or remove the stream-path `publishRobotEvent` calls and the `web-chat-*` duplicate filter.
+
+## 2026-07-22 - Task: make the home page customer-facing
+### What was done
+- Reduced the home page to a single customer-facing chat surface and removed the visible request inspector, JSON payload, trace fields, and upstream event feed.
+- Refreshed the visual hierarchy with a service-oriented header, online status, accessible message labels, calmer colors, responsive spacing, and customer-facing copy.
+- Preserved the existing local SSE chat flow and upstream event subscription so both local and upstream stream responses continue appearing in the left chat area.
+- Updated the browser metadata to describe the customer-facing airport service assistant.
+
+### Testing
+- `npm run build` passed.
+- IDE diagnostics reported no errors for the touched application files.
+
+### Notes
+- `src/app-home/robot-console-page.js`: removed customer-visible debug UI and related state, then added the single-column customer chat presentation.
+- `app/layout.js`: updated the page title and description for the customer-facing assistant.
+- `progress.md`: appended this implementation and verification note.
+- `.trellis/tasks/07-22-customer-facing-chat-ui/prd.md`: recorded scope and acceptance criteria for this task.
+- Rollback: restore the previous `robot-console-page.js` and `app/layout.js` versions; backend streaming and `/robot/events` behavior are unchanged.

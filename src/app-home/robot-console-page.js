@@ -8,7 +8,7 @@ const initialMessages = [
   {
     id: "welcome",
     role: "assistant",
-    content: "你好，我是机器人对话助手。你输入的话会按机器人协议发给 DeepSeek；上游机器人请求也会在这里实时显示。",
+    content: "你好，我是智能服务助手。你可以咨询航班、天气、路线，也可以了解这里的服务。",
   },
 ];
 
@@ -31,71 +31,6 @@ function updateMessageContent(messages, messageId, updater) {
       content: updater(message.content),
     };
   });
-}
-
-function formatJson(value) {
-  return JSON.stringify(value, null, 2);
-}
-
-function formatTime(value) {
-  if (!value) {
-    return "--:--:--";
-  }
-
-  return new Date(value).toLocaleTimeString("zh-CN", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function getEventLabel(type) {
-  const labels = {
-    ready: "监听已连接",
-    voice: "语音状态",
-    asr_partial: "ASR 中间结果",
-    final_input: "最终输入",
-    deepseek_delta: "DeepSeek 流式输出",
-    tts_done: "最终 TTS",
-    robot_error: "接口异常",
-  };
-
-  return labels[type] || type;
-}
-
-function summarizeMonitorEvent(type, event) {
-  const data = event?.data || event || {};
-
-  if (type === "voice") {
-    return data.status === "1" ? "用户开始说话 / 机器人开始监听" : "用户说话结束 / 开始处理";
-  }
-
-  if (type === "asr_partial") {
-    return data.content || "空 ASR 中间结果";
-  }
-
-  if (type === "final_input") {
-    if (data.event === "CMD") {
-      return `${data.functionName || "CMD"} ${typeof data.functionParam === "string" ? data.functionParam : ""}`.trim();
-    }
-
-    return data.content || data.event || "最终输入已收到";
-  }
-
-  if (type === "deepseek_delta") {
-    return data.content || "";
-  }
-
-  if (type === "tts_done") {
-    return data.content || "TTS 文案已生成";
-  }
-
-  if (type === "robot_error") {
-    return data.message || data.reason || "接口异常";
-  }
-
-  return data.ok ? "SSE 已连接" : "等待事件";
 }
 
 function getUpstreamConversationKey(event, data) {
@@ -176,9 +111,9 @@ function createCommandInputContent(data) {
   return data.functionName ? `执行${data.functionName}命令` : "上游命令已收到";
 }
 
-function createUpstreamInputContent(event, data, chat) {
+function createUpstreamInputContent(data, chat) {
   if (data.event === "CMD") {
-    return chat?.latestAsrContent || createCommandInputContent(data) || summarizeMonitorEvent("final_input", event);
+    return chat?.latestAsrContent || createCommandInputContent(data);
   }
 
   return data.content || chat?.latestAsrContent || "上游输入已收到";
@@ -192,27 +127,11 @@ function isWebConsoleSession(data) {
   return typeof data.sessionId === "string" && data.sessionId.startsWith("web-chat-");
 }
 
-const initialMonitorState = {
-  traceId: "",
-  voiceStatus: "",
-  phase: "",
-  latestAsr: "",
-  finalInput: "",
-  functionName: "",
-  streamReply: "",
-  finalTts: "",
-  error: "",
-};
-
 export function RobotConsolePage() {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [lastExchange, setLastExchange] = useState(null);
-  const [monitorConnected, setMonitorConnected] = useState(false);
-  const [monitorState, setMonitorState] = useState(initialMonitorState);
-  const [monitorEvents, setMonitorEvents] = useState([]);
   const upstreamChatsRef = useRef({});
   const processedRobotEventIdsRef = useRef(new Set());
 
@@ -308,7 +227,7 @@ export function RobotConsolePage() {
         }
 
         chat.finalEvent = data.event || chat.finalEvent;
-        upsertUpstreamUserMessage(chat, createUpstreamInputContent(event, data, chat));
+        upsertUpstreamUserMessage(chat, createUpstreamInputContent(data, chat));
         ensureUpstreamAssistantMessage(chat);
         return;
       }
@@ -353,101 +272,12 @@ export function RobotConsolePage() {
     }
 
     return subscribeRobotEvents({
-      onOpen: () => {
-        setMonitorConnected(true);
-      },
-      onError: () => {
-        setMonitorConnected(false);
-      },
       onEvent: (eventName, event) => {
         const data = event?.data || event || {};
         applyUpstreamChatEvent(eventName, event, data);
-
-        const displayEvent = {
-          id: event?.id || `${eventName}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          type: eventName,
-          at: event?.at || data.at || new Date().toISOString(),
-          traceId: data.traceId || event?.traceId || "",
-          summary: summarizeMonitorEvent(eventName, event),
-        };
-
-        setMonitorEvents((current) => [displayEvent, ...current].slice(0, 40));
-        setMonitorState((current) => {
-          if (eventName === "ready") {
-            return {
-              ...current,
-              error: "",
-            };
-          }
-
-          if (eventName === "voice") {
-            return {
-              ...current,
-              traceId: data.traceId || current.traceId,
-              voiceStatus: data.status || "",
-              phase: data.phase || "",
-              error: "",
-            };
-          }
-
-          if (eventName === "asr_partial") {
-            return {
-              ...current,
-              traceId: data.traceId || current.traceId,
-              latestAsr: data.content || "",
-              error: "",
-            };
-          }
-
-          if (eventName === "final_input") {
-            return {
-              ...current,
-              traceId: data.traceId || current.traceId,
-              finalInput: data.event === "CMD" ? summarizeMonitorEvent(eventName, event) : data.content || "",
-              functionName: data.functionName || "",
-              streamReply: "",
-              finalTts: "",
-              error: "",
-            };
-          }
-
-          if (eventName === "deepseek_delta") {
-            return {
-              ...current,
-              traceId: data.traceId || current.traceId,
-              streamReply: `${current.streamReply}${data.content || ""}`,
-              error: "",
-            };
-          }
-
-          if (eventName === "tts_done") {
-            return {
-              ...current,
-              traceId: data.traceId || current.traceId,
-              finalTts: data.content || "",
-              streamReply: current.streamReply || data.content || "",
-              error: "",
-            };
-          }
-
-          if (eventName === "robot_error") {
-            return {
-              ...current,
-              traceId: data.traceId || current.traceId,
-              error: data.message || data.reason || "接口异常",
-            };
-          }
-
-          return current;
-        });
       },
     });
   }, []);
-
-  function clearMonitor() {
-    setMonitorState(initialMonitorState);
-    setMonitorEvents([]);
-  }
 
   async function submitMessage(event) {
     event.preventDefault();
@@ -466,21 +296,7 @@ export function RobotConsolePage() {
     setMessages((current) => [...current, userMessage, assistantMessage]);
 
     try {
-      const result = await sendChatMessageStream(content, {
-        onStart: (exchange) => {
-          setLastExchange(exchange);
-        },
-        onMeta: (meta) => {
-          setLastExchange((current) => ({
-            ...current,
-            traceId: meta.traceId,
-            data: {
-              robotId: meta.robotId,
-              event: meta.event,
-              content: "",
-            },
-          }));
-        },
+      await sendChatMessageStream(content, {
         onDelta: (delta) => {
           setMessages((current) => updateMessageContent(
             current,
@@ -505,9 +321,9 @@ export function RobotConsolePage() {
         },
       });
 
-      setLastExchange(result);
     } catch (requestError) {
-      setError(`请求失败：${requestError.message}`);
+      const message = requestError instanceof Error ? requestError.message : "未知错误";
+      setError(`请求失败：${message}`);
       setMessages((current) => updateMessageContent(
         current,
         assistantMessage.id,
@@ -530,30 +346,37 @@ export function RobotConsolePage() {
     <main className="chat-shell">
       <section className="chat-card">
         <header className="chat-header">
-          <div>
-            <p className="eyebrow">Transit Server Chat</p>
-            <h1>机器人对话</h1>
+          <div className="brand-lockup">
+            <div className="brand-mark" aria-hidden="true">智</div>
+            <div>
+              <p className="eyebrow">机场智能服务</p>
+              <h1>您好，有什么可以帮您？</h1>
+              <p className="brand-description">航班查询、路线指引、天气信息，随时为您服务</p>
+            </div>
           </div>
           <div className="status-pill">
             <span />
-            /robot/listenQwen/stream
+            服务在线
           </div>
         </header>
 
         <section className="messages" aria-label="对话消息">
           {messages.map((message) => (
             <article className={`message ${message.role}`} key={message.id}>
-              <div className="avatar">{message.role === "assistant" ? "AI" : "我"}</div>
-              <div className={`bubble ${message.content ? "" : "typing"}`}>
-                {message.content ? (
-                  <p>{message.content}</p>
-                ) : (
-                  <>
-                    <span />
-                    <span />
-                    <span />
-                  </>
-                )}
+              <div className="avatar" aria-hidden="true">{message.role === "assistant" ? "智" : "我"}</div>
+              <div className="message-body">
+                <span className="message-label">{message.role === "assistant" ? "智能服务助手" : "您"}</span>
+                <div className={`bubble ${message.content ? "" : "typing"}`}>
+                  {message.content ? (
+                    <p>{message.content}</p>
+                  ) : (
+                    <>
+                      <span />
+                      <span />
+                      <span />
+                    </>
+                  )}
+                </div>
               </div>
             </article>
           ))}
@@ -561,7 +384,8 @@ export function RobotConsolePage() {
 
         {error ? <div className="error">{error}</div> : null}
 
-        <div className="quick-prompts">
+        <div className="quick-prompts" aria-label="快捷提问">
+          <span className="quick-prompts-label">您可以这样问</span>
           {quickPrompts.map((prompt) => (
             <button type="button" key={prompt} onClick={() => applyPrompt(prompt)}>
               {prompt}
@@ -578,102 +402,16 @@ export function RobotConsolePage() {
                 submitMessage(event);
               }
             }}
-            placeholder="输入一句话，回车发送"
+            placeholder="请输入您想了解的内容"
             rows={1}
             aria-label="聊天输入"
           />
           <button type="submit" disabled={loading || !input.trim()}>
-            {loading ? "发送中" : "发送"}
+            {loading ? "回复中" : "发送"}
           </button>
         </form>
+        <p className="composer-hint">按 Enter 发送，Shift + Enter 换行</p>
       </section>
-
-      <aside className="inspector">
-        <section className="inspector-section">
-          <p className="eyebrow">Robot Payload</p>
-          <h2>本次请求</h2>
-          <dl>
-            <div>
-              <dt>HTTP</dt>
-              <dd>{lastExchange ? lastExchange.status : "暂无"}</dd>
-            </div>
-            <div>
-              <dt>Trace ID</dt>
-              <dd>{lastExchange?.traceId || "暂无"}</dd>
-            </div>
-            <div>
-              <dt>Event</dt>
-              <dd>{lastExchange?.payload?.event || "SPEECH_CONTEXT"}</dd>
-            </div>
-          </dl>
-          <pre>{lastExchange ? formatJson(lastExchange.payload) : "发送消息后展示机器人请求体"}</pre>
-        </section>
-
-        <section className="inspector-section monitor-panel">
-          <div className="monitor-heading">
-            <div>
-              <p className="eyebrow">Upstream Monitor</p>
-              <h2>上游实时监听</h2>
-            </div>
-            <span className={`monitor-status ${monitorConnected ? "connected" : "disconnected"}`}>
-              {monitorConnected ? "已连接" : "未连接"}
-            </span>
-          </div>
-
-          <dl className="monitor-fields">
-            <div>
-              <dt>Trace</dt>
-              <dd>{monitorState.traceId || "暂无"}</dd>
-            </div>
-            <div>
-              <dt>Voice</dt>
-              <dd>{monitorState.voiceStatus ? `${monitorState.voiceStatus} / ${monitorState.phase}` : "暂无"}</dd>
-            </div>
-            <div>
-              <dt>ASR</dt>
-              <dd>{monitorState.latestAsr || "暂无"}</dd>
-            </div>
-            <div>
-              <dt>Final</dt>
-              <dd>{monitorState.finalInput || "暂无"}</dd>
-            </div>
-            <div>
-              <dt>Reply</dt>
-              <dd>{monitorState.streamReply || "暂无"}</dd>
-            </div>
-            <div>
-              <dt>TTS</dt>
-              <dd>{monitorState.finalTts || "暂无"}</dd>
-            </div>
-            {monitorState.error ? (
-              <div>
-                <dt>Error</dt>
-                <dd>{monitorState.error}</dd>
-              </div>
-            ) : null}
-          </dl>
-
-          <div className="monitor-actions">
-            <button type="button" onClick={clearMonitor}>清空监听</button>
-            <span>GET /robot/events</span>
-          </div>
-
-          <div className="event-feed" aria-label="上游事件流">
-            {monitorEvents.length === 0 ? (
-              <p className="empty-feed">等待上游请求...</p>
-            ) : monitorEvents.map((event) => (
-              <article className={`event-item ${event.type}`} key={event.id}>
-                <div className="event-meta">
-                  <span>{formatTime(event.at)}</span>
-                  <strong>{getEventLabel(event.type)}</strong>
-                </div>
-                <p>{event.summary}</p>
-                {event.traceId ? <small>{event.traceId}</small> : null}
-              </article>
-            ))}
-          </div>
-        </section>
-      </aside>
 
       <style jsx>{`
         :global(*) {
@@ -701,8 +439,7 @@ export function RobotConsolePage() {
           gap: 20px;
         }
 
-        .chat-card,
-        .inspector {
+        .chat-card {
           border: 1px solid rgba(36, 26, 18, 0.13);
           background: rgba(255, 252, 244, 0.76);
           box-shadow: 0 26px 80px rgba(72, 51, 29, 0.16);
@@ -955,234 +692,317 @@ export function RobotConsolePage() {
           font-weight: 800;
         }
 
-        .inspector {
-          align-self: start;
-          position: sticky;
-          top: 32px;
-          border-radius: 30px;
-          padding: 18px;
-          display: grid;
-          gap: 18px;
-          max-height: calc(100vh - 64px);
-          overflow: auto;
+      `}</style>
+
+      <style jsx>{`
+        :global(body) {
+          background: #f3f6fa;
+          color: #17212b;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
         }
 
-        .inspector-section {
+        .chat-shell {
+          min-height: 100svh;
+          width: min(100%, 1080px);
+          padding: 24px 20px;
+          display: flex;
+          justify-content: center;
+          margin: 0 auto;
+        }
+
+        .chat-card {
+          width: 100%;
+          min-height: calc(100svh - 48px);
+          border: 1px solid #e2e8f0;
+          border-radius: 24px;
+          background: #ffffff;
+          box-shadow: 0 20px 60px rgba(38, 62, 86, 0.1);
+        }
+
+        .chat-header {
+          min-height: 104px;
+          padding: 24px 32px;
+          align-items: center;
+          border-bottom: 1px solid #edf1f5;
+          background: #ffffff;
+        }
+
+        .brand-lockup {
+          display: flex;
+          align-items: center;
+          gap: 14px;
           min-width: 0;
         }
 
-        .inspector-section + .inspector-section {
-          border-top: 1px solid rgba(36, 26, 18, 0.1);
-          padding-top: 18px;
+        .brand-mark {
+          width: 44px;
+          height: 44px;
+          flex: 0 0 auto;
+          display: grid;
+          place-items: center;
+          border-radius: 14px;
+          background: linear-gradient(145deg, #2d8d91, #2365a5);
+          color: #ffffff;
+          font-size: 20px;
+          font-weight: 700;
+          box-shadow: 0 8px 18px rgba(35, 101, 165, 0.22);
         }
 
-        .monitor-heading {
+        .eyebrow {
+          color: #277d83;
+          font-size: 11px;
+          letter-spacing: 0.12em;
+        }
+
+        h1 {
+          margin-top: 5px;
+          color: #162433;
+          font-size: clamp(22px, 3vw, 30px);
+          line-height: 1.2;
+          letter-spacing: -0.03em;
+        }
+
+        .brand-description {
+          margin: 5px 0 0;
+          color: #7a8795;
+          font-size: 13px;
+        }
+
+        .status-pill {
+          padding: 8px 12px;
+          border: 1px solid #d7eee9;
+          background: #f1fbf8;
+          color: #287b68;
+          font-family: inherit;
+          font-size: 12px;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+
+        .status-pill span {
+          background: #35a780;
+          box-shadow: 0 0 0 4px rgba(53, 167, 128, 0.12);
+        }
+
+        .messages {
+          min-height: 420px;
+          padding: 32px 40px;
+          gap: 24px;
+          background: linear-gradient(180deg, #fbfcfe 0%, #f7f9fc 100%);
+          scrollbar-gutter: stable;
+        }
+
+        .message {
           display: flex;
-          justify-content: space-between;
-          gap: 12px;
+          gap: 11px;
+          max-width: min(760px, 100%);
           align-items: flex-start;
         }
 
-        .monitor-status {
-          flex: 0 0 auto;
-          border: 1px solid rgba(36, 26, 18, 0.14);
-          border-radius: 999px;
-          padding: 6px 9px;
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .monitor-status.connected {
-          color: #23543a;
-          background: rgba(66, 121, 90, 0.14);
-        }
-
-        .monitor-status.disconnected {
-          color: #6f2d20;
-          background: rgba(111, 45, 32, 0.12);
-        }
-
-        .monitor-fields {
-          margin: 16px 0;
-        }
-
-        .monitor-actions {
+        .message.user {
           display: flex;
-          justify-content: space-between;
-          gap: 10px;
-          align-items: center;
-          margin-bottom: 12px;
+          flex-direction: row-reverse;
+          align-self: flex-end;
         }
 
-        .monitor-actions button {
-          padding: 8px 12px;
-          font-size: 13px;
-        }
-
-        .monitor-actions span {
-          color: #77624d;
-          font-family: "SFMono-Regular", "Menlo", monospace;
-          font-size: 11px;
-        }
-
-        .event-feed {
-          display: grid;
-          gap: 10px;
-          max-height: 360px;
-          overflow: auto;
-        }
-
-        .empty-feed {
-          margin: 0;
-          border: 1px dashed rgba(36, 26, 18, 0.18);
-          border-radius: 16px;
-          padding: 14px;
-          color: #77624d;
-          font-size: 13px;
-        }
-
-        .event-item {
-          border: 1px solid rgba(36, 26, 18, 0.11);
-          border-radius: 16px;
-          padding: 10px 11px;
-          background: rgba(255, 255, 255, 0.56);
-        }
-
-        .event-item.deepseek_delta {
-          background: rgba(66, 121, 90, 0.11);
-        }
-
-        .event-item.robot_error {
-          background: rgba(111, 45, 32, 0.11);
-        }
-
-        .event-meta {
-          display: flex;
-          justify-content: space-between;
-          gap: 8px;
-          color: #77624d;
-          font-family: "SFMono-Regular", "Menlo", monospace;
-          font-size: 11px;
-        }
-
-        .event-meta strong {
-          color: #5e4a37;
-        }
-
-        .event-item p {
-          margin: 7px 0 0;
-          line-height: 1.55;
-          overflow-wrap: anywhere;
-        }
-
-        .event-item small {
-          display: block;
-          margin-top: 6px;
-          color: #8b735c;
-          font-family: "SFMono-Regular", "Menlo", monospace;
-          overflow-wrap: anywhere;
-        }
-
-        dl {
-          display: grid;
-          gap: 10px;
-          margin: 22px 0;
-        }
-
-        dl div {
-          display: grid;
-          grid-template-columns: 72px 1fr;
-          gap: 10px;
-          align-items: start;
-        }
-
-        dt {
-          color: #77624d;
-          font-size: 13px;
-        }
-
-        dd {
+        .message-body {
           min-width: 0;
-          margin: 0;
-          overflow-wrap: anywhere;
-          color: #2d2118;
-          font-family: "SFMono-Regular", "Menlo", monospace;
+        }
+
+        .message.user .message-body {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+        }
+
+        .message-label {
+          display: block;
+          margin: 0 0 6px 3px;
+          color: #8b98a6;
+          font-size: 11px;
+        }
+
+        .message.user .message-label {
+          margin-left: 0;
+          margin-right: 3px;
+        }
+
+        .avatar {
+          width: 36px;
+          height: 36px;
+          flex: 0 0 auto;
+          border-radius: 12px;
+          background: #e8f5f4;
+          color: #277d83;
+          font-size: 13px;
+          box-shadow: none;
+        }
+
+        .message.user .avatar {
+          background: #263f5d;
+          color: #ffffff;
+        }
+
+        .bubble {
+          max-width: 640px;
+          border: 1px solid #e5ebf1;
+          border-radius: 18px;
+          border-bottom-left-radius: 5px;
+          padding: 13px 16px;
+          background: #ffffff;
+          color: #293746;
+          box-shadow: 0 4px 14px rgba(30, 52, 73, 0.04);
+        }
+
+        .message.user .bubble {
+          border: 0;
+          border-bottom-right-radius: 5px;
+          background: #2c668f;
+          color: #ffffff;
+        }
+
+        .bubble p {
+          font-size: 15px;
+          line-height: 1.75;
+        }
+
+        .typing {
+          min-width: 70px;
+          min-height: 46px;
+          background: #f0f5f8;
+          box-shadow: none;
+        }
+
+        .typing span {
+          width: 6px;
+          height: 6px;
+          background: #4e98a0;
+        }
+
+        .error {
+          margin: 0 40px 14px;
+          border: 1px solid #f2d3d3;
+          background: #fff6f6;
+          color: #b24a4a;
           font-size: 13px;
         }
 
-        pre {
-          min-height: 260px;
-          margin: 0;
-          border: 1px solid rgba(36, 26, 18, 0.12);
-          border-radius: 20px;
-          padding: 16px;
-          overflow: auto;
-          background: #211a14;
-          color: #ffe9bd;
-          font-family: "SFMono-Regular", "Menlo", monospace;
-          font-size: 12px;
-          line-height: 1.6;
-          white-space: pre-wrap;
+        .quick-prompts {
+          flex-wrap: wrap;
+          align-items: center;
+          padding: 0 40px 18px;
+          background: #f7f9fc;
         }
 
-        @media (max-width: 960px) {
-          .chat-shell {
-            grid-template-columns: 1fr;
-          }
+        .quick-prompts-label {
+          flex: 0 0 100%;
+          margin-bottom: 2px;
+          color: #8b98a6;
+          font-size: 12px;
+        }
 
-          .chat-card {
-            min-height: 78vh;
-          }
+        button {
+          border-color: #dbe5ed;
+          background: #ffffff;
+          color: #416176;
+          font-family: inherit;
+          transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+        }
 
-          .inspector {
-            position: static;
-          }
+        button:hover:not(:disabled) {
+          border-color: #9bc8ca;
+          background: #eff9f8;
+          color: #247b80;
+          box-shadow: none;
+        }
+
+        .composer {
+          gap: 12px;
+          padding: 18px 40px 10px;
+          border-top: 1px solid #e7edf2;
+          background: #ffffff;
+        }
+
+        textarea {
+          min-height: 50px;
+          border-color: #dce5ec;
+          border-radius: 16px;
+          padding: 13px 15px;
+          background: #f8fafc;
+          color: #1d2b39;
+          font-family: inherit;
+          font-size: 15px;
+        }
+
+        textarea:focus {
+          border-color: #4aa0a2;
+          box-shadow: 0 0 0 4px rgba(74, 160, 162, 0.12);
+          background: #ffffff;
+        }
+
+        .composer button {
+          min-width: 84px;
+          padding: 0 18px;
+          border: 0;
+          border-radius: 14px;
+          background: #2c668f;
+          color: #ffffff;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .composer button:hover:not(:disabled) {
+          background: #24577c;
+          color: #ffffff;
+          transform: translateY(-1px);
+        }
+
+        .composer button:disabled {
+          background: #b8c8d4;
+          color: #ffffff;
+        }
+
+        .composer-hint {
+          margin: 0;
+          padding: 0 40px 20px;
+          background: #ffffff;
+          color: #a0aab5;
+          font-size: 11px;
+          text-align: right;
         }
 
         @media (max-width: 640px) {
           .chat-shell {
-            width: min(100vw - 20px, 640px);
-            padding: 10px 0;
+            width: 100%;
+            padding: 0;
           }
 
-          .chat-card,
-          .inspector {
-            border-radius: 24px;
-          }
-
-          .chat-header,
-          .messages {
-            padding-left: 18px;
-            padding-right: 18px;
+          .chat-card {
+            min-height: 100svh;
+            border: 0;
+            border-radius: 0;
           }
 
           .chat-header {
-            flex-direction: column;
+            padding: 20px 18px;
+          }
+
+          .brand-description {
+            display: none;
+          }
+
+          .status-pill {
+            align-self: flex-start;
+          }
+
+          .messages {
+            min-height: 0;
+            padding: 24px 18px;
           }
 
           .message,
           .message.user {
-            grid-template-columns: 34px minmax(0, 1fr);
-            align-self: stretch;
-          }
-
-          .message.user .avatar {
-            grid-column: 1;
-          }
-
-          .message.user .bubble {
-            grid-column: 2;
-          }
-
-          .avatar {
-            width: 34px;
-            height: 34px;
-            border-radius: 12px;
-            font-size: 12px;
-          }
-
-          .bubble {
-            max-width: 100%;
+            max-width: 94%;
           }
 
           .quick-prompts {
@@ -1191,11 +1011,14 @@ export function RobotConsolePage() {
           }
 
           .composer {
-            grid-template-columns: 1fr;
+            grid-template-columns: minmax(0, 1fr) auto;
+            padding-left: 18px;
+            padding-right: 18px;
           }
 
-          .composer button {
-            min-height: 48px;
+          .composer-hint {
+            padding-left: 18px;
+            padding-right: 18px;
           }
         }
       `}</style>
