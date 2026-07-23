@@ -273,7 +273,7 @@ Content-Type: application/json; charset=utf-8
 {
   "robotId": "4",
   "event": "RESPONSE_CONTEXT",
-  "content": "您好，我是机场服务机器人。"
+  "content": "您好，我是智能服务机器人。"
 }
 ```
 

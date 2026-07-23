@@ -77,3 +77,47 @@
 - `REQUEST_EXAMPLES.md`: added a JSON endpoint request example.
 - `progress.md`: appended this implementation and verification note.
 - Rollback: revert the changes in the listed source and documentation files; existing commands and stream protocol remain unchanged.
+
+## 2026-07-22 - Task: add an interactive digital avatar
+### What was done
+- Added a lightweight 2D airport service avatar to the customer-facing chat page without introducing model or animation dependencies.
+- Gave the avatar idle floating, breathing, blinking, and shadow animations, plus a click-triggered wave, hop, and temporary greeting bubble.
+- Added responsive placement so the avatar moves above the composer on narrower screens and does not cover the input controls.
+- Added accessible button labeling, keyboard focus feedback, timer cleanup, and reduced-motion support.
+
+### Testing
+- `npm run build` passed.
+- IDE diagnostics reported no errors for the avatar and chat page files.
+- `git diff --check` passed.
+- Browser checks passed at 500px and 390px widths; the avatar does not overlap the quick prompts or composer.
+- Click interaction showed the greeting bubble and interaction state, then dismissed the bubble after about 2.8 seconds.
+- The 390px greeting bubble remained fully inside the viewport, and the page showed no runtime error overlay.
+
+### Notes
+- `src/app-home/digital-avatar.js`: added the SVG service avatar, interaction state, greeting timer, responsive placement, and animations.
+- `src/app-home/robot-console-page.js`: mounted the digital avatar without changing chat or streaming behavior.
+- `progress.md`: appended this implementation and verification note.
+- `.trellis/tasks/07-22-interactive-digital-avatar/prd.md`: recorded the selected lightweight 2D design and acceptance criteria.
+- Rollback: remove the `DigitalAvatar` import and render call, then delete `src/app-home/digital-avatar.js`.
+
+## 2026-07-23 - Task: generalize intelligent service branding
+### What was done
+- Removed airport-specific wording from the customer-facing page, metadata, quick prompts, digital-avatar label, and representative protocol examples.
+- Kept existing flight, weather, location, boarding-gate, and streaming protocol behavior unchanged.
+
+### Testing
+- `npm run build` passed.
+- IDE diagnostics reported no errors for the edited UI files.
+- `git diff --check` passed.
+- Repository search confirmed that remaining airport-specific wording exists only in historical progress notes.
+
+### Notes
+- `app/layout.js`: changed the page title and description to generic intelligent-service wording.
+- `src/app-home/robot-console-page.js`: changed the welcome, header, and service description copy.
+- `src/app-home/digital-avatar.js`: changed the accessible SVG title to a generic service attendant label.
+- `src/app-home/examples.js`: replaced the location-specific quick prompt with a generic service-flow prompt.
+- `TRANSIT_SERVER_API.md`: changed the representative response to generic intelligent-service wording.
+- `ROBOT_INTERACTION_FLOW.md`: changed the representative response to generic intelligent-service wording.
+- `.trellis/tasks/07-22-interactive-digital-avatar/prd.md`: aligned the task description with the generic service positioning.
+- `progress.md`: recorded this branding update and verification.
+- Rollback: restore the previous copy in the listed files; protocol implementation and command handling do not need rollback.

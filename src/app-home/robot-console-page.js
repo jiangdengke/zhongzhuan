@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { sendChatMessageStream, subscribeRobotEvents } from "./chat-api.js";
+import { DigitalAvatar } from "./digital-avatar.js";
 import { quickPrompts } from "./examples.js";
 
 const initialMessages = [
   {
     id: "welcome",
     role: "assistant",
-    content: "你好，我是智能服务助手。你可以咨询航班、天气、路线，也可以了解这里的服务。",
+    content: "你好，我是智能服务助手。你可以咨询问题、获取信息，也可以了解相关服务。",
   },
 ];
 
@@ -354,9 +355,9 @@ export function RobotConsolePage() {
           <div className="brand-lockup">
             <div className="brand-mark" aria-hidden="true">智</div>
             <div>
-              <p className="eyebrow">机场智能服务</p>
+              <p className="eyebrow">智能服务</p>
               <h1>您好，有什么可以帮您？</h1>
-              <p className="brand-description">航班查询、路线指引、天气信息，随时为您服务</p>
+              <p className="brand-description">信息咨询、服务指引，随时为您提供帮助</p>
             </div>
           </div>
           <div className="status-pill">
@@ -417,6 +418,8 @@ export function RobotConsolePage() {
         </form>
         <p className="composer-hint">按 Enter 发送，Shift + Enter 换行</p>
       </section>
+
+      <DigitalAvatar />
 
       <style jsx>{`
         :global(*) {
@@ -704,6 +707,7 @@ export function RobotConsolePage() {
           background: #f3f6fa;
           color: #17212b;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+          overflow-x: hidden;
         }
 
         .chat-shell {
@@ -989,7 +993,14 @@ export function RobotConsolePage() {
           }
 
           .chat-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 14px;
             padding: 20px 18px;
+          }
+
+          .brand-lockup {
+            width: 100%;
           }
 
           .brand-description {
@@ -1007,18 +1018,42 @@ export function RobotConsolePage() {
 
           .message,
           .message.user {
-            max-width: 94%;
+            width: 100%;
+            max-width: 100%;
+          }
+
+          .message-body {
+            max-width: calc(100% - 47px);
+          }
+
+          .bubble {
+            max-width: 100%;
           }
 
           .quick-prompts {
             padding-left: 18px;
             padding-right: 18px;
+            overflow-x: visible;
+          }
+
+          .quick-prompts button {
+            flex: 0 1 auto;
+            white-space: normal;
           }
 
           .composer {
             grid-template-columns: minmax(0, 1fr) auto;
             padding-left: 18px;
             padding-right: 18px;
+          }
+
+          textarea {
+            min-width: 0;
+          }
+
+          .composer button {
+            min-width: 72px;
+            padding: 0 14px;
           }
 
           .composer-hint {
