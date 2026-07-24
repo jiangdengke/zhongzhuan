@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { sendChatMessageStream, subscribeRobotEvents } from "./chat-api.js";
-import { DigitalAvatar } from "./digital-avatar.js";
-import { quickPrompts } from "./examples.js";
+import { subscribeRobotEvents } from "./chat-api.js";
 
 const initialMessages = [
   {
@@ -12,6 +10,23 @@ const initialMessages = [
     content: "你好，我是智能服务助手。你可以咨询问题、获取信息，也可以了解相关服务。",
   },
 ];
+
+const voiceAssistantStatusCopy = {
+  ready: {
+    title: "随时为您服务",
+    description: "请直接说出您的需求",
+  },
+  listening: {
+    title: "正在聆听",
+    description: "请继续说，我会为您识别",
+  },
+  processing: {
+    title: "正在思考",
+    description: "正在整理您的需求并生成回复",
+  },
+};
+
+const voiceWaveformBarIndexes = Array.from({ length: 13 }, (_, barIndex) => barIndex);
 
 function createMessage(role, content) {
   return {
@@ -133,11 +148,37 @@ function isWebConsoleSession(data) {
   return typeof data.sessionId === "string" && data.sessionId.startsWith("web-chat-");
 }
 
+function getVoiceAssistantState(eventName, data) {
+  if (eventName === "voice") {
+    if (data.status === "1") {
+      return "listening";
+    }
+
+    if (data.status === "0") {
+      return "processing";
+    }
+  }
+
+  if (eventName === "asr_partial") {
+    return "listening";
+  }
+
+  if (eventName === "final_input" || eventName === "deepseek_delta") {
+    return "processing";
+  }
+
+  if (eventName === "tts_done" || eventName === "robot_error") {
+    return "ready";
+  }
+
+  return null;
+}
+
 export function RobotConsolePage() {
   const [messages, setMessages] = useState(initialMessages);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [voiceAssistantState, setVoiceAssistantState] = useState("ready");
+  const [interactionNumber, setInteractionNumber] = useState(0);
+  const [isVoiceControlAwake, setIsVoiceControlAwake] = useState(false);
   const upstreamChatsRef = useRef({});
   const processedRobotEventIdsRef = useRef(new Set());
 
@@ -280,72 +321,22 @@ export function RobotConsolePage() {
     return subscribeRobotEvents({
       onEvent: (eventName, event) => {
         const data = event?.data || event || {};
+        const nextVoiceAssistantState = getVoiceAssistantState(eventName, data);
+
+        if (nextVoiceAssistantState) {
+          setVoiceAssistantState(nextVoiceAssistantState);
+        }
+
         applyUpstreamChatEvent(eventName, event, data);
       },
     });
   }, []);
 
-  async function submitMessage(event) {
-    event.preventDefault();
+  const voiceAssistantCopy = voiceAssistantStatusCopy[voiceAssistantState];
 
-    const content = input.trim();
-    if (!content || loading) {
-      return;
-    }
-
-    setInput("");
-    setError("");
-    setLoading(true);
-
-    const userMessage = createMessage("user", content);
-    const assistantMessage = createMessage("assistant", "");
-    setMessages((current) => [...current, userMessage, assistantMessage]);
-
-    try {
-      await sendChatMessageStream(content, {
-        onDelta: (delta) => {
-          setMessages((current) => updateMessageContent(
-            current,
-            assistantMessage.id,
-            (previousContent) => `${previousContent}${delta}`,
-          ));
-        },
-        onError: (data) => {
-          setError(data?.message || "请求失败，请稍后再试。");
-          setMessages((current) => updateMessageContent(
-            current,
-            assistantMessage.id,
-            (previousContent) => previousContent || data?.content || "请求失败，请稍后再试。",
-          ));
-        },
-        onDone: (data) => {
-          setMessages((current) => updateMessageContent(
-            current,
-            assistantMessage.id,
-            (previousContent) => previousContent || data?.content || "模型返回无效，您可以尝试重新对我说",
-          ));
-        },
-      });
-
-    } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : "未知错误";
-      setError(`请求失败：${message}`);
-      setMessages((current) => updateMessageContent(
-        current,
-        assistantMessage.id,
-        () => "请求失败，请稍后再试。",
-      ));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function applyPrompt(prompt) {
-    if (loading) {
-      return;
-    }
-
-    setInput(prompt);
+  function handleVoiceAssistantInteraction() {
+    setIsVoiceControlAwake(true);
+    setInteractionNumber((currentNumber) => currentNumber + 1);
   }
 
   return (
@@ -388,38 +379,65 @@ export function RobotConsolePage() {
           ))}
         </section>
 
-        {error ? <div className="error">{error}</div> : null}
-
-        <div className="quick-prompts" aria-label="快捷提问">
-          <span className="quick-prompts-label">您可以这样问</span>
-          {quickPrompts.map((prompt) => (
-            <button type="button" key={prompt} onClick={() => applyPrompt(prompt)}>
-              {prompt}
-            </button>
-          ))}
-        </div>
-
-        <form className="composer" onSubmit={submitMessage}>
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                submitMessage(event);
-              }
-            }}
-            placeholder="请输入您想了解的内容"
-            rows={1}
-            aria-label="聊天输入"
-          />
-          <button type="submit" disabled={loading || !input.trim()}>
-            {loading ? "回复中" : "发送"}
-          </button>
-        </form>
-        <p className="composer-hint">按 Enter 发送，Shift + Enter 换行</p>
+        <section
+          className={`voice-assistant voice-assistant--${voiceAssistantState}`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <div className="voice-assistant__visual" aria-hidden="true">
+            <div className="voice-assistant__waveform">
+              {voiceWaveformBarIndexes.map((barIndex) => (
+                <span key={barIndex} />
+              ))}
+            </div>
+          </div>
+          <div className="voice-assistant__copy">
+            <strong>{voiceAssistantCopy.title}</strong>
+            <p>{voiceAssistantCopy.description}</p>
+          </div>
+        </section>
       </section>
 
-      <DigitalAvatar />
+      <aside
+        className={`voice-assistant-control voice-assistant-control--${voiceAssistantState} ${isVoiceControlAwake ? "voice-assistant-control--awake" : ""}`}
+        aria-label="语音助手"
+      >
+        {isVoiceControlAwake ? (
+          <div
+            className="voice-assistant-control__feedback"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            语音助手已唤醒
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="voice-assistant-control__button"
+          onClick={handleVoiceAssistantInteraction}
+          aria-label={isVoiceControlAwake ? "语音助手已唤醒" : "唤醒语音助手"}
+        >
+          <span className="voice-assistant-control__halo" aria-hidden="true" />
+          {interactionNumber > 0 ? (
+            <span
+              className="voice-assistant-control__interaction-pulse"
+              key={interactionNumber}
+              aria-hidden="true"
+            />
+          ) : null}
+          <svg className="voice-assistant-control__icon" viewBox="0 0 64 64" aria-hidden="true">
+            <rect x="24" y="9" width="16" height="31" rx="8" fill="currentColor" />
+            <path d="M17 29a15 15 0 0 0 30 0" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+            <path d="M32 44v10M24 55h16" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+            <path className="voice-assistant-control__sound-wave" d="M51 23c3 4 3 10 0 14M56 18c5 7 5 17 0 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+          </svg>
+          <span className="voice-assistant-control__hint">
+            {isVoiceControlAwake ? "已唤醒" : "点我唤醒"}
+          </span>
+        </button>
+      </aside>
 
       <style jsx>{`
         :global(*) {
@@ -620,86 +638,6 @@ export function RobotConsolePage() {
           }
         }
 
-        .error {
-          margin: 0 28px 14px;
-          border-radius: 18px;
-          padding: 12px 14px;
-          background: #6f2d20;
-          color: #fff4e6;
-        }
-
-        .quick-prompts {
-          display: flex;
-          gap: 8px;
-          padding: 0 28px 14px;
-          overflow-x: auto;
-        }
-
-        button {
-          appearance: none;
-          border: 1px solid rgba(36, 26, 18, 0.14);
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.72);
-          color: #2d2118;
-          cursor: pointer;
-          font: inherit;
-          transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
-        }
-
-        button:hover:not(:disabled) {
-          transform: translateY(-1px);
-          background: #fff9ec;
-          box-shadow: 0 10px 24px rgba(52, 37, 22, 0.12);
-        }
-
-        button:disabled {
-          cursor: wait;
-          opacity: 0.55;
-        }
-
-        .quick-prompts button {
-          flex: 0 0 auto;
-          padding: 9px 13px;
-          font-size: 14px;
-        }
-
-        .composer {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) auto;
-          gap: 12px;
-          padding: 18px;
-          border-top: 1px solid rgba(36, 26, 18, 0.1);
-          background: rgba(255, 250, 238, 0.58);
-        }
-
-        textarea {
-          width: 100%;
-          max-height: 180px;
-          border: 1px solid rgba(36, 26, 18, 0.14);
-          border-radius: 22px;
-          padding: 15px 16px;
-          resize: vertical;
-          outline: none;
-          background: rgba(255, 255, 255, 0.82);
-          color: #241a12;
-          font: inherit;
-          line-height: 1.6;
-        }
-
-        textarea:focus {
-          border-color: rgba(123, 76, 31, 0.72);
-          box-shadow: 0 0 0 4px rgba(186, 127, 53, 0.18);
-        }
-
-        .composer button {
-          align-self: stretch;
-          min-width: 96px;
-          padding: 0 20px;
-          background: #263b2f;
-          color: #fff5df;
-          font-weight: 800;
-        }
-
       `}</style>
 
       <style jsx>{`
@@ -888,96 +826,359 @@ export function RobotConsolePage() {
           background: #4e98a0;
         }
 
-        .error {
-          margin: 0 40px 14px;
-          border: 1px solid #f2d3d3;
-          background: #fff6f6;
-          color: #b24a4a;
-          font-size: 13px;
-        }
-
-        .quick-prompts {
-          flex-wrap: wrap;
+        .voice-assistant-control {
+          position: fixed;
+          right: max(12px, calc((100vw - 1080px) / 2 - 92px));
+          bottom: 28px;
+          z-index: 31;
+          width: 112px;
+          display: flex;
+          flex-direction: column;
           align-items: center;
-          padding: 0 40px 18px;
-          background: #f7f9fc;
+          gap: 8px;
+          pointer-events: none;
         }
 
-        .quick-prompts-label {
-          flex: 0 0 100%;
-          margin-bottom: 2px;
-          color: #8b98a6;
+        .voice-assistant-control__feedback {
+          border: 1px solid #cce7e8;
+          border-radius: 999px;
+          padding: 8px 12px;
+          background: rgba(255, 255, 255, 0.96);
+          color: #277d83;
           font-size: 12px;
+          line-height: 1;
+          white-space: nowrap;
+          box-shadow: 0 8px 20px rgba(35, 101, 165, 0.12);
+          animation: voice-assistant-feedback 220ms ease-out both;
         }
 
-        button {
-          border-color: #dbe5ed;
-          background: #ffffff;
-          color: #416176;
-          font-family: inherit;
-          transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
-        }
-
-        button:hover:not(:disabled) {
-          border-color: #9bc8ca;
-          background: #eff9f8;
-          color: #247b80;
-          box-shadow: none;
-        }
-
-        .composer {
-          gap: 12px;
-          padding: 18px 40px 10px;
-          border-top: 1px solid #e7edf2;
-          background: #ffffff;
-        }
-
-        textarea {
-          min-height: 50px;
-          border-color: #dce5ec;
-          border-radius: 16px;
-          padding: 13px 15px;
-          background: #f8fafc;
-          color: #1d2b39;
-          font-family: inherit;
-          font-size: 15px;
-        }
-
-        textarea:focus {
-          border-color: #4aa0a2;
-          box-shadow: 0 0 0 4px rgba(74, 160, 162, 0.12);
-          background: #ffffff;
-        }
-
-        .composer button {
-          min-width: 84px;
-          padding: 0 18px;
-          border: 0;
-          border-radius: 14px;
-          background: #2c668f;
+        .voice-assistant-control__button {
+          position: relative;
+          width: 82px;
+          height: 82px;
+          display: grid;
+          place-items: center;
+          padding: 0;
+          border: 1px solid rgba(255, 255, 255, 0.88);
+          border-radius: 50%;
+          background: linear-gradient(145deg, #2d8d91, #2365a5);
           color: #ffffff;
-          font-size: 14px;
-          font-weight: 700;
+          cursor: pointer;
+          pointer-events: auto;
+          box-shadow: 0 14px 30px rgba(35, 101, 165, 0.26);
+          -webkit-tap-highlight-color: transparent;
         }
 
-        .composer button:hover:not(:disabled) {
-          background: #24577c;
-          color: #ffffff;
-          transform: translateY(-1px);
+        .voice-assistant-control__button:focus-visible {
+          outline: 3px solid rgba(45, 141, 145, 0.42);
+          outline-offset: 4px;
         }
 
-        .composer button:disabled {
-          background: #b8c8d4;
-          color: #ffffff;
+        .voice-assistant-control__halo {
+          position: absolute;
+          inset: -8px;
+          border: 1px solid rgba(57, 161, 180, 0.28);
+          border-radius: 50%;
+          animation: voice-assistant-control-breathe 2.8s ease-in-out infinite;
         }
 
-        .composer-hint {
-          margin: 0;
-          padding: 0 40px 20px;
-          background: #ffffff;
-          color: #a0aab5;
+        .voice-assistant-control__interaction-pulse {
+          position: absolute;
+          inset: -8px;
+          border: 2px solid rgba(57, 161, 180, 0.48);
+          border-radius: 50%;
+          animation: voice-assistant-control-ripple 620ms ease-out both;
+          pointer-events: none;
+        }
+
+        .voice-assistant-control--awake .voice-assistant-control__halo {
+          border-color: rgba(47, 194, 173, 0.56);
+          background: rgba(47, 194, 173, 0.08);
+          box-shadow: 0 0 20px rgba(47, 194, 173, 0.18);
+        }
+
+        .voice-assistant-control__icon {
+          position: relative;
+          z-index: 1;
+          width: 38px;
+          height: 38px;
+        }
+
+        .voice-assistant-control__sound-wave {
+          opacity: 0.72;
+          animation: voice-assistant-control-wave 1.8s ease-in-out infinite;
+        }
+
+        .voice-assistant-control__hint {
+          position: absolute;
+          right: -31px;
+          bottom: -28px;
+          width: 82px;
+          color: #668091;
           font-size: 11px;
-          text-align: right;
+          line-height: 1.2;
+          text-align: center;
+          pointer-events: none;
+        }
+
+        .voice-assistant-control--listening .voice-assistant-control__button {
+          background: linear-gradient(145deg, #2fc2ad, #2e8fd0);
+          box-shadow: 0 14px 34px rgba(45, 165, 173, 0.34);
+        }
+
+        .voice-assistant-control--processing .voice-assistant-control__button {
+          background: linear-gradient(145deg, #579fe5, #706fd8);
+          box-shadow: 0 14px 34px rgba(82, 137, 214, 0.3);
+        }
+
+        .voice-assistant-control__button:hover {
+          transform: translateY(-2px) scale(1.02);
+        }
+
+        @keyframes voice-assistant-control-breathe {
+          0%, 100% {
+            transform: scale(0.96);
+            opacity: 0.55;
+          }
+
+          50% {
+            transform: scale(1.08);
+            opacity: 1;
+          }
+        }
+
+        @keyframes voice-assistant-control-wave {
+          0%, 100% {
+            opacity: 0.45;
+            transform: translateX(0);
+          }
+
+          50% {
+            opacity: 1;
+            transform: translateX(2px);
+          }
+        }
+
+        @keyframes voice-assistant-control-ripple {
+          from {
+            transform: scale(0.92);
+            opacity: 1;
+          }
+
+          to {
+            transform: scale(1.5);
+            opacity: 0;
+          }
+        }
+
+        @keyframes voice-assistant-feedback {
+          from {
+            opacity: 0;
+            transform: translateY(6px);
+          }
+
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .voice-assistant {
+          --voice-wave-start: #4cbfc1;
+          --voice-wave-end: #377fc0;
+          --voice-glow: rgba(67, 164, 188, 0.2);
+          position: relative;
+          flex: 0 0 auto;
+          min-height: 176px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          overflow: hidden;
+          border-top: 1px solid #e4ecf2;
+          padding: 20px 40px 24px;
+          background:
+            radial-gradient(circle at 50% 18%, var(--voice-glow), transparent 42%),
+            linear-gradient(180deg, #ffffff 0%, #f7fbfd 100%);
+          text-align: center;
+        }
+
+        .voice-assistant--listening {
+          --voice-wave-start: #31c9bd;
+          --voice-wave-end: #2e8fd0;
+          --voice-glow: rgba(49, 201, 189, 0.24);
+        }
+
+        .voice-assistant--processing {
+          --voice-wave-start: #529ee8;
+          --voice-wave-end: #706fd8;
+          --voice-glow: rgba(82, 137, 214, 0.22);
+        }
+
+        .voice-assistant__visual {
+          position: relative;
+          width: min(300px, 100%);
+          height: 68px;
+          display: grid;
+          place-items: center;
+        }
+
+        .voice-assistant__visual::before,
+        .voice-assistant__visual::after {
+          content: "";
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          border-radius: 999px;
+          transform: translate(-50%, -50%);
+          pointer-events: none;
+        }
+
+        .voice-assistant__visual::before {
+          width: 220px;
+          height: 54px;
+          background: var(--voice-glow);
+          filter: blur(18px);
+          animation: voice-assistant-glow 2.8s ease-in-out infinite;
+        }
+
+        .voice-assistant__visual::after {
+          width: 246px;
+          height: 58px;
+          border: 1px solid rgba(112, 166, 190, 0.17);
+          background: rgba(255, 255, 255, 0.48);
+          box-shadow: inset 0 0 24px rgba(70, 139, 176, 0.06);
+        }
+
+        .voice-assistant__waveform {
+          position: relative;
+          z-index: 1;
+          width: min(210px, 78vw);
+          height: 46px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 5px;
+        }
+
+        .voice-assistant__waveform span {
+          width: 6px;
+          height: 38%;
+          flex: 0 0 auto;
+          border-radius: 999px;
+          background: linear-gradient(180deg, var(--voice-wave-start), var(--voice-wave-end));
+          box-shadow: 0 2px 8px var(--voice-glow);
+          transform-origin: center;
+          animation: voice-assistant-ready 2.6s ease-in-out infinite;
+        }
+
+        .voice-assistant__waveform span:nth-child(2),
+        .voice-assistant__waveform span:nth-child(12) {
+          height: 50%;
+          animation-delay: -180ms;
+        }
+
+        .voice-assistant__waveform span:nth-child(3),
+        .voice-assistant__waveform span:nth-child(11) {
+          height: 66%;
+          animation-delay: -360ms;
+        }
+
+        .voice-assistant__waveform span:nth-child(4),
+        .voice-assistant__waveform span:nth-child(10) {
+          height: 82%;
+          animation-delay: -540ms;
+        }
+
+        .voice-assistant__waveform span:nth-child(5),
+        .voice-assistant__waveform span:nth-child(9) {
+          height: 100%;
+          animation-delay: -720ms;
+        }
+
+        .voice-assistant__waveform span:nth-child(6),
+        .voice-assistant__waveform span:nth-child(8) {
+          height: 76%;
+          animation-delay: -900ms;
+        }
+
+        .voice-assistant__waveform span:nth-child(7) {
+          height: 56%;
+          animation-delay: -1080ms;
+        }
+
+        .voice-assistant--listening .voice-assistant__waveform span {
+          animation-name: voice-assistant-listening;
+          animation-duration: 860ms;
+        }
+
+        .voice-assistant--processing .voice-assistant__waveform span {
+          animation-name: voice-assistant-processing;
+          animation-duration: 1.2s;
+        }
+
+        .voice-assistant__copy strong {
+          display: block;
+          color: #24465d;
+          font-size: 16px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+        }
+
+        .voice-assistant__copy p {
+          margin: 4px 0 0;
+          color: #8293a1;
+          font-size: 12px;
+          line-height: 1.5;
+        }
+
+        @keyframes voice-assistant-ready {
+          0%, 100% {
+            transform: scaleY(0.7);
+            opacity: 0.62;
+          }
+
+          50% {
+            transform: scaleY(1);
+            opacity: 0.9;
+          }
+        }
+
+        @keyframes voice-assistant-listening {
+          0%, 100% {
+            transform: scaleY(0.4);
+            opacity: 0.72;
+          }
+
+          50% {
+            transform: scaleY(1.08);
+            opacity: 1;
+          }
+        }
+
+        @keyframes voice-assistant-processing {
+          0%, 100% {
+            transform: scaleY(0.5);
+            opacity: 0.68;
+          }
+
+          50% {
+            transform: scaleY(0.92);
+            opacity: 1;
+          }
+        }
+
+        @keyframes voice-assistant-glow {
+          0%, 100% {
+            opacity: 0.56;
+            transform: translate(-50%, -50%) scale(0.92);
+          }
+
+          50% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.08);
+          }
         }
 
         @media (max-width: 640px) {
@@ -1030,35 +1231,59 @@ export function RobotConsolePage() {
             max-width: 100%;
           }
 
-          .quick-prompts {
-            padding-left: 18px;
-            padding-right: 18px;
-            overflow-x: visible;
+          .voice-assistant {
+            min-height: 168px;
+            padding: 18px 18px 22px;
           }
 
-          .quick-prompts button {
-            flex: 0 1 auto;
-            white-space: normal;
+          .voice-assistant__visual {
+            height: 64px;
           }
 
-          .composer {
-            grid-template-columns: minmax(0, 1fr) auto;
-            padding-left: 18px;
-            padding-right: 18px;
+          .voice-assistant__visual::after {
+            width: min(246px, 88vw);
           }
 
-          textarea {
-            min-width: 0;
+          .voice-assistant-control {
+            right: 12px;
+            bottom: 190px;
+            width: 88px;
           }
 
-          .composer button {
-            min-width: 72px;
-            padding: 0 14px;
+          .voice-assistant-control__button {
+            width: 68px;
+            height: 68px;
           }
 
-          .composer-hint {
-            padding-left: 18px;
-            padding-right: 18px;
+          .voice-assistant-control__icon {
+            width: 32px;
+            height: 32px;
+          }
+
+          .voice-assistant-control__hint {
+            right: -21px;
+            bottom: -27px;
+            width: 68px;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .voice-assistant-control {
+            bottom: 238px;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .voice-assistant-control__halo,
+          .voice-assistant-control__sound-wave,
+          .voice-assistant-control__interaction-pulse,
+          .voice-assistant-control__feedback {
+            animation: none;
+          }
+
+          .voice-assistant__visual::before,
+          .voice-assistant__waveform span {
+            animation: none;
           }
         }
       `}</style>
