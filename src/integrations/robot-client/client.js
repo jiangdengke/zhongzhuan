@@ -53,7 +53,7 @@ export async function sendVoiceSessionControl({ robotId, sessionId, status }) {
     await response.text();
 
     if (!response.ok) {
-      const responseError = new Error(`Robot client returned HTTP ${responseStatus}`);
+      const responseError = new Error(`Voice service returned HTTP ${responseStatus}`);
       responseError.statusCode = responseStatus;
       throw responseError;
     }

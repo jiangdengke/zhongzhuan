@@ -33,8 +33,20 @@ export function handleVoiceMonitor(payload, options = {}) {
   const robotId = readString(payload?.robotId, DEFAULT_ROBOT_ID);
   const status = readString(payload?.status);
 
+  logInfo("voiceMonitor", "request_received", {
+    direction: "语音服务→中转服务",
+    route: "POST /robot/voiceMonitor",
+    service: "语音服务",
+    traceId,
+    robotId,
+    status,
+  });
+
   if (!isVoiceStatus(status)) {
     logError("voiceMonitor", "invalid_status", {
+      direction: "语音服务→中转服务",
+      route: "POST /robot/voiceMonitor",
+      service: "语音服务",
       traceId,
       robotId,
       status,
@@ -58,6 +70,9 @@ export function handleVoiceMonitor(payload, options = {}) {
   }
 
   logInfo("voiceMonitor", "request_completed", {
+    direction: "语音服务→中转服务",
+    route: "POST /robot/voiceMonitor",
+    service: "语音服务",
     traceId,
     robotId,
     status,

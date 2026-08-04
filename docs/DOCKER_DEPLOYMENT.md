@@ -6,18 +6,18 @@ This Compose configuration deploys only the transit service:
 
 ```text
 External client -> host:4000 -> transit-server container
-transit-server container -> host.docker.internal:9000 -> robot client on host
+transit-server container -> host.docker.internal:9000 -> voice service on host
 ```
 
-The robot client is managed separately and is not part of this Compose project.
+The voice service is managed separately and is not part of this Compose project. The existing `ROBOT_CLIENT_*` environment names and `robotId` protocol field are compatibility names; operational logs describe this dependency as the voice service and the configured device as the terminal.
 
 ## Prerequisites
 
 1. Install Docker Engine with the Compose plugin.
 2. Create `.env` from `.env.example` and provide the required model credentials.
-3. Run the robot client on the same host at port `9000`.
-4. On Linux, make the robot client listen on `0.0.0.0:9000` or another address reachable through the Docker host gateway. A process listening only on `127.0.0.1:9000` is generally not reachable from a Linux container through `host.docker.internal`.
-5. On Linux, allow TCP port `9000` from the Compose bridge subnet through the host firewall. Scope this rule to the Docker subnet instead of exposing the robot client to untrusted networks.
+3. Run the voice service on the same host at port `9000`.
+4. On Linux, make the voice service listen on `0.0.0.0:9000` or another address reachable through the Docker host gateway. A process listening only on `127.0.0.1:9000` is generally not reachable from a Linux container through `host.docker.internal`.
+5. On Linux, allow TCP port `9000` from the Compose bridge subnet through the host firewall. Scope this rule to the Docker subnet instead of exposing the voice service to untrusted networks.
 6. Allow inbound TCP port `4000` through the host firewall when other machines need to call the transit service.
 
 The Compose file injects this container-specific address without changing the native `.env` value:
@@ -55,12 +55,14 @@ The named volume survives application container recreation, while the retention 
 Application logs use the default `LOG_FORMAT=pretty` format so they can be read directly from Docker without a JSON viewer. Each line contains a Chinese module name, one status emoji, and pipe-separated fields:
 
 ```text
-2026-08-04 06:20:31.245 INFO  [语音会话] 📤 正在连接机器人 | 会话=session-b506... | 机器人=4 | 状态=1 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 超时=5000ms
-2026-08-04 06:20:31.248 INFO  [语音会话] ✅ 语音会话已开始 | 会话=session-b506... | 机器人=4 | 状态=1 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 耗时=3ms
-2026-08-04 06:20:36.247 ERROR [语音会话] ❌ 机器人控制失败 | 会话=session-b506... | 机器人=4 | 状态=1 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT
+2026-08-04 06:20:31.245 INFO  [会话控制][页面→中转服务] 📥 收到页面控制请求 | 状态=1 | 动作=开始 | 接口="POST /api/voice-session/control"
+2026-08-04 06:20:31.248 INFO  [会话控制][中转服务→语音服务] 📤 下发语音控制指令 | 会话=session-b506... | 终端=4 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 超时=5000ms
+2026-08-04 06:20:31.251 INFO  [会话控制][语音服务→中转服务] ✅ 语音服务已接收控制指令 | 会话=session-b506... | 终端=4 | HTTP=200 | 耗时=3ms
+2026-08-04 06:20:31.252 INFO  [会话控制][中转服务→页面] 📤 返回页面控制结果 | 会话=session-b506... | 动作=开始 | 结果=成功 | HTTP=200
+2026-08-04 06:20:36.247 ERROR [会话控制][语音服务→中转服务] ❌ 下发语音控制失败 | 会话=session-b506... | 终端=4 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT
 ```
 
-The application enriches robot-client failures with the target address, elapsed time, timeout classification, and low-level network code when the runtime provides them. View the same readable output with:
+The application enriches voice-service failures with the target address, elapsed time, timeout classification, and low-level network code when the runtime provides them. Model callback logs also show the received whole-session ID, the active whole-session ID, and explicit ignore reasons when `/robot/model/Response/stream` arrives before its start callback or carries an ASR per-utterance ID. View the same readable output with:
 
 ```bash
 docker logs --tail 100 -f zhongzhuan
@@ -100,7 +102,7 @@ To remove the retained application logs as well:
 docker compose down --volumes
 ```
 
-## Troubleshooting robot-client access
+## Troubleshooting voice-service access
 
 Test host resolution from the running container:
 
@@ -109,11 +111,11 @@ docker compose exec transit-server \
   node -e "fetch('http://host.docker.internal:9000/robot/voiceSession/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ robotId: '4', sessionId: 'connectivity-test', status: '0' }) }).then(async (response) => console.log(response.status, await response.text())).catch((error) => { console.error(error); process.exit(1); })"
 ```
 
-This command sends a real stop control request. Use it only when doing an explicit connectivity test with the robot client owner.
+This command sends a real stop control request. Use it only when doing an explicit connectivity test with the voice service owner.
 
-The transit service sends robot control requests with `Connection: close` and consumes the response body before completing the request. This gives the separately managed Python control service an explicit, orderly connection lifecycle and avoids resetting a reused connection after a successful `200` response.
+The transit service sends voice control requests with `Connection: close` and consumes the response body before completing the request. This gives the separately managed Python voice service an explicit, orderly connection lifecycle and avoids resetting a reused connection after a successful `200` response.
 
-If the request cannot connect on Linux, verify the robot process listener on the host:
+If the request cannot connect on Linux, verify the voice service listener on the host:
 
 ```bash
 ss -lntp | grep ':9000'
@@ -135,4 +137,4 @@ sudo ufw status
 sudo ufw allow from <compose-subnet> to any port 9000 proto tcp
 ```
 
-For firewalld, inspect the active zones and add an equivalent source-scoped rule. Do not add an unrestricted public rule for port `9000` unless the robot client has separate authentication and network protections.
+For firewalld, inspect the active zones and add an equivalent source-scoped rule. Do not add an unrestricted public rule for port `9000` unless the voice service has separate authentication and network protections.

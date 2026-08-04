@@ -21,25 +21,32 @@ let lastLogRetentionPruneDay = "";
 
 const SCOPE_LABELS = {
   voiceMonitor: "语音状态",
-  listenQwen: "语音转发",
+  listenQwen: "语音识别",
   deepseek: "DeepSeek",
-  voiceSession: "语音会话",
-  modelResponse: "模型回调",
+  voiceSession: "会话控制",
+  modelResponse: "模型回复",
+  robotEvents: "页面推送",
 };
 
 const MESSAGE_LABELS = {
   voiceMonitor: {
+    request_received: "📥 收到语音服务状态回调",
     invalid_json: "❌ JSON 解析失败",
     invalid_status: "❌ 状态无效",
-    request_completed: "✅ 语音状态已更新",
+    request_completed: "✅ 已接收说话状态",
+    response_sent: "📤 返回语音状态结果",
   },
   listenQwen: {
     invalid_json: "❌ JSON 解析失败",
-    request_received: "📥 收到语音请求",
+    request_received: "📥 收到语音服务回调",
     skip_speech_after_cmd: "⚠️ 跳过重复语音请求",
     redirect_speech_to_cmd: "🔀 转为固定指令",
-    response_ready: "✅ 返回响应",
+    response_ready: "✅ 语音回复已生成",
+    asr_partial_received: "✅ 收到 ASR 识别结果",
+    branch_cmd: "✅ 固定命令已处理",
     unknown_event: "⚠️ 未知事件",
+    response_sent: "📤 返回语音服务结果",
+    route_selected: "🔀 已选择回复来源",
   },
   deepseek: {
     request_start: "⏳ 请求 DeepSeek",
@@ -48,46 +55,111 @@ const MESSAGE_LABELS = {
     request_failed_status: "❌ DeepSeek 返回异常",
     request_success: "✅ DeepSeek 请求完成",
     request_exception: "❌ DeepSeek 请求失败",
+    first_delta: "📥 收到 DeepSeek 首片",
   },
   voiceSession: {
-    control_sending: "📤 正在连接机器人",
-    control_failed: "❌ 机器人控制失败",
-    started: "✅ 语音会话已开始",
-    ended: "🛑 语音会话已结束",
+    request_received: "📥 收到页面控制请求",
+    request_rejected: "⚠️ 拒绝页面控制请求",
+    response_sent: "📤 返回页面控制结果",
+    session_created: "🆕 创建整段会话",
+    session_reused: "🔁 复用整段会话",
+    forward_started: "📤 下发语音控制指令",
+    forward_succeeded: "✅ 语音服务已接收控制指令",
+    control_sending: "📤 下发语音控制指令",
+    control_failed: "❌ 下发语音控制失败",
+    started: "✅ 整段会话已进入活动状态",
+    ended: "🛑 整段会话已结束",
+    state_changed: "🔄 整段会话状态已更新",
+    conflict: "⚠️ 会话控制冲突",
+    ignored: "⚠️ 忽略重复控制",
   },
   modelResponse: {
-    started: "📥 收到模型响应开始",
-    completed: "✅ 模型响应已完成",
-    delta_received: "📥 收到模型增量",
+    request_received: "📥 收到模型回调",
+    started: "📥 已创建模型回复",
+    completed: "✅ 模型输出完成",
+    delta_received: "⏳ 收到模型增量",
+    progress: "⏳ 模型输出中",
+    ignored: "⚠️ 忽略模型回调",
+    interrupted: "⚠️ 模型回复被中断",
+    expired: "⚠️ 模型回复已过期清理",
+    response_sent: "📤 返回模型回调结果",
   },
+  robotEvents: {
+    event_published: "📤 事件已写入页面推送",
+    subscriber_connected: "📥 页面已连接事件流",
+    subscriber_disconnected: "⚠️ 页面已断开事件流",
+    replay_completed: "📤 已完成事件重放",
+    snapshot_sent: "📤 已发送模型回复快照",
+    listener_failed: "❌ 页面推送监听器失败",
+  },
+};
+
+const DEFAULT_DIRECTIONS = {
+  voiceMonitor: "语音服务→中转服务",
+  listenQwen: "语音服务→中转服务",
+  modelResponse: "语音服务→中转服务",
+  robotEvents: "中转服务→页面",
 };
 
 const KEY_LABELS = {
   traceId: "追踪",
   requestId: "请求",
   sessionId: "会话",
-  robotId: "机器人",
+  wholeSessionId: "会话",
+  activeSessionId: "当前会话",
+  utteranceSessionId: "话轮",
+  turnId: "话轮",
+  responseId: "回复",
+  eventId: "事件",
+  eventType: "事件类型",
+  robotId: "终端",
   status: "状态",
   phase: "阶段",
+  action: "动作",
   event: "事件",
+  route: "接口",
+  method: "方法",
+  service: "服务",
+  source: "来源",
+  responseSource: "回复来源",
+  outcome: "结果",
+  reason: "原因",
+  ignored: "已忽略",
+  ignoreReason: "忽略原因",
+  association: "关联",
   functionName: "函数",
   model: "模型",
-  contentPreview: "用户",
+  contentPreview: "内容",
   functionParamPreview: "参数",
+  language: "语言",
   replyPreview: "回复",
   answerPreview: "回答",
   answerLength: "字数",
+  contentLength: "字数",
+  characterCount: "累计字数",
+  totalChars: "总字数",
   returnedLength: "返回字数",
   chunkCount: "片段数",
+  receivedChunkCount: "已收片段",
+  firstChunkLatencyMs: "首片耗时",
+  totalDurationMs: "总耗时",
   hasFunctionParam: "有参数",
   hasApiKey: "有密钥",
   statusCode: "HTTP",
+  httpStatus: "HTTP",
   statusText: "状态文本",
   ok: "成功",
   durationMs: "耗时",
   timeoutMs: "超时",
   baseUrl: "地址",
   target: "地址",
+  address: "地址",
+  listenerCount: "在线页面",
+  replayCount: "重放数",
+  snapshotCount: "快照数",
+  connectionId: "连接",
+  connectionDurationMs: "连接时长",
+  queueWaitMs: "排队耗时",
   stream: "模式",
   wasTruncated: "已截断",
   error: "原因",
@@ -97,11 +169,28 @@ const DETAIL_ORDER = [
   "traceId",
   "requestId",
   "sessionId",
+  "wholeSessionId",
+  "activeSessionId",
+  "utteranceSessionId",
+  "turnId",
+  "responseId",
+  "eventId",
+  "eventType",
   "stream",
   "robotId",
   "status",
   "phase",
+  "action",
   "event",
+  "route",
+  "method",
+  "service",
+  "source",
+  "responseSource",
+  "outcome",
+  "reason",
+  "ignoreReason",
+  "association",
   "functionName",
   "model",
   "baseUrl",
@@ -111,14 +200,28 @@ const DETAIL_ORDER = [
   "ok",
   "contentPreview",
   "functionParamPreview",
+  "language",
   "hasFunctionParam",
   "replyPreview",
   "answerPreview",
   "answerLength",
+  "contentLength",
+  "characterCount",
+  "totalChars",
   "returnedLength",
   "chunkCount",
+  "receivedChunkCount",
+  "firstChunkLatencyMs",
+  "totalDurationMs",
   "wasTruncated",
   "target",
+  "address",
+  "listenerCount",
+  "replayCount",
+  "snapshotCount",
+  "connectionId",
+  "connectionDurationMs",
+  "queueWaitMs",
   "durationMs",
   "timeoutMs",
   "error",
@@ -181,14 +284,6 @@ export function formatError(error) {
     name: "Error",
     message: String(error),
   };
-}
-
-function shortenIdentifier(value) {
-  if (typeof value !== "string" || value.length <= 20) {
-    return value;
-  }
-
-  return `${value.slice(0, 12)}...`;
 }
 
 function readErrorProperty(error, propertyName) {
@@ -264,6 +359,20 @@ function readableMessage(scope, message) {
   return MESSAGE_LABELS[scope]?.[message] ?? message;
 }
 
+function readableDirection(scope, message, direction) {
+  if (direction) {
+    return direction;
+  }
+
+  if (scope === "deepseek") {
+    return message === "response_received" || message === "request_success"
+      ? "DeepSeek→中转服务"
+      : "中转服务→DeepSeek";
+  }
+
+  return DEFAULT_DIRECTIONS[scope] ?? "中转内部";
+}
+
 function readableScope(scope) {
   return SCOPE_LABELS[scope] ?? scope;
 }
@@ -285,11 +394,7 @@ function formatValue(key, value) {
     return "";
   }
 
-  if (key === "durationMs") {
-    return `${value}ms`;
-  }
-
-  if (key === "timeoutMs") {
+  if (key.endsWith("Ms")) {
     return `${value}ms`;
   }
 
@@ -309,16 +414,23 @@ function formatValue(key, value) {
     return value ? "是" : "否";
   }
 
-  if (key === "traceId" || key === "requestId") {
+  if (
+    key === "traceId" ||
+    key === "requestId" ||
+    key === "sessionId" ||
+    key === "wholeSessionId" ||
+    key === "activeSessionId" ||
+    key === "utteranceSessionId" ||
+    key === "turnId" ||
+    key === "responseId" ||
+    key === "eventId" ||
+    key === "connectionId"
+  ) {
     return shortenTrace(value);
   }
 
   if (key === "error") {
     return formatReadableError(value);
-  }
-
-  if (key === "sessionId") {
-    return shortenIdentifier(value);
   }
 
   if (typeof value === "object") {
@@ -358,9 +470,11 @@ function formatDetails(details) {
 }
 
 function formatPretty(record) {
-  const { ts, level, scope, message, ...details } = record;
+  const { ts, level, scope, message, direction, ...details } = record;
   const detailText = formatDetails(details);
-  const line = `${formatTimestamp(new Date(ts))} ${level.toUpperCase().padEnd(5)} [${readableScope(scope)}] ${readableMessage(scope, message)}`;
+  const readableScopeName = readableScope(scope);
+  const readableDirectionName = readableDirection(scope, message, direction);
+  const line = `${formatTimestamp(new Date(ts))} ${level.toUpperCase().padEnd(5)} [${readableScopeName}][${readableDirectionName}] ${readableMessage(scope, message)}`;
 
   return detailText ? `${line} | ${detailText}` : line;
 }
@@ -474,6 +588,11 @@ function emit(level, scope, message, details = {}) {
     return;
   }
 
+  if (level === "warn") {
+    console.warn(line);
+    return;
+  }
+
   console.log(line);
 }
 
@@ -483,4 +602,8 @@ export function logInfo(scope, message, details = {}) {
 
 export function logError(scope, message, details = {}) {
   emit("error", scope, message, details);
+}
+
+export function logWarn(scope, message, details = {}) {
+  emit("warn", scope, message, details);
 }

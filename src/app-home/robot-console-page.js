@@ -141,7 +141,7 @@ function createUpstreamInputContent(data, chat) {
 }
 
 function createAsrPartialContent(data) {
-  return data.content ? `正在识别：${data.content}` : "正在识别...";
+  return data.content || "";
 }
 
 function isWebConsoleSession(data) {
@@ -157,10 +157,6 @@ function getVoiceAssistantState(eventName, data) {
     if (data.status === "0") {
       return "processing";
     }
-  }
-
-  if (eventName === "asr_partial") {
-    return "listening";
   }
 
   if (
@@ -336,8 +332,14 @@ export function RobotConsolePage() {
       }
 
       if (eventName === "asr_partial") {
-        chat.latestAsrContent = readText(data.content) || chat.latestAsrContent;
-        upsertUpstreamUserMessage(chat, createAsrPartialContent(data));
+        const recognizedContent = createAsrPartialContent(data);
+
+        if (!recognizedContent) {
+          return;
+        }
+
+        chat.latestAsrContent = recognizedContent;
+        upsertUpstreamUserMessage(chat, recognizedContent);
         return;
       }
 
@@ -467,7 +469,7 @@ export function RobotConsolePage() {
     } catch (error) {
       const fallbackMessage = isVoiceSessionActive
         ? "结束失败，请再次点击重试"
-        : "开启失败，请检查机器人连接";
+        : "开启失败，请检查语音服务连接";
 
       setVoiceControlMessage(error instanceof Error && error.message
         ? error.message

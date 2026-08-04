@@ -430,3 +430,38 @@
 - `docs/DOCKER_DEPLOYMENT.md`: documents why normal response consumption is required for the Python control service connection lifecycle.
 - `progress.md`: records the connection-reset fix and verification evidence.
 - Rollback: restore `response.body?.cancel()` in the robot control client and remove the related deployment note; this would reintroduce the previous connection-reset risk.
+
+## 2026-08-04 - Task: trace the voice-service model callback chain
+### What was done
+- Added directional, business-readable logs across page control, transit processing, voice-service callbacks, model-response accumulation, and browser SSE delivery.
+- Distinguished whole-session IDs from per-utterance ASR IDs and made ignored model callbacks report whether the session was wrong, the start callback was missing, the content was empty, the response was duplicated, or the response was cleaned up.
+- Sampled high-frequency model increments while preserving every SSE fragment, and added connection, replay, snapshot, disconnect, and listener-failure visibility for the page event stream.
+- Removed the persistent `正在识别：` prefix from ASR transcript messages and prevented ASR partial events alone from forcing the page into the listening state.
+- Updated operator and integration documentation to describe the separately managed dependency as the voice service while retaining existing protocol paths and compatibility environment names.
+
+### Testing
+- `npm run build` passed with all application routes compiled, linted, and type-checked by Next.js.
+- A local voice-service mock received matching start and stop controls with one transit-generated whole-session ID.
+- A live callback test verified `response_monitor status=1 -> Response/stream delta* -> response_monitor status=0`, received `model_response_start`, two `model_response_delta`, and `model_response_done` SSE events, and preserved both text fragments.
+- Negative callback tests returned HTTP 200 with `ignored: true` and logged explicit reasons for a per-utterance ID used as the whole-session ID and for a stream fragment received before the start callback.
+- A live `ASR_PARTIAL` callback returned HTTP 200 and logged one concise line with `话轮`, recognized content, and duration; repository search confirmed the `正在识别：` prefix is no longer present in source code.
+- `git diff --check` and IDE diagnostics passed after the final changes.
+
+### Notes
+- `app/api/voice-session/control/route.js`: records the page request and the final transit response with direction, action, whole-session ID, HTTP status, result, and duration.
+- `app/robot/events/route.js`: records SSE connections, replay counts, active snapshots, and disconnect duration.
+- `app/robot/model/Response/stream/route.js`: records invalid or rejected stream responses without duplicating every successful model fragment log.
+- `app/robot/model/response_monitor/route.js`: records model start/end callback receipt and the result returned to the voice service.
+- `app/robot/voiceMonitor/route.js`: records the result returned for voice status callbacks.
+- `docs/DOCKER_DEPLOYMENT.md`: documents the voice-service role, directional log examples, and callback diagnostics.
+- `docs/ROBOT_VOICE_SESSION.md`: documents the mandatory three-phase model callback order, whole-session requirement, ignore reasons, log sampling, and ASR display behavior.
+- `src/app-home/robot-console-page.js`: displays only recognized ASR text and no longer changes assistant state solely because an ASR partial arrived.
+- `src/features/robot/application/listen-qwen.js`: labels ASR IDs as per-utterance turns and removes duplicate request logging for each partial result.
+- `src/features/robot/application/model-response.js`: logs accepted, ignored, interrupted, expired, and completed model callback states with whole-session and response summaries.
+- `src/features/robot/application/robot-events.js`: records sampled event publication and listener failures while exposing current listener status to the SSE route.
+- `src/features/robot/application/voice-monitor.js`: records incoming voice-service status callbacks with the correct service role.
+- `src/features/robot/application/voice-session.js`: records session creation/reuse, outbound voice control, voice-service acceptance, internal state transitions, conflicts, and repeated controls.
+- `src/integrations/robot-client/client.js`: changes the non-success HTTP error wording from robot client to voice service without changing the compatibility module API.
+- `src/shared/logging/logger.js`: adds directional scope formatting, Chinese business field names, warning support, duration formatting, and model/SSE event labels.
+- `progress.md`: records the implementation, runtime evidence, file scope, and rollback point for this task.
+- Rollback: preserve later edits, then run `git restore --source=853baf3 -- app/api/voice-session/control/route.js app/robot/events/route.js app/robot/model/Response/stream/route.js app/robot/model/response_monitor/route.js app/robot/voiceMonitor/route.js docs/DOCKER_DEPLOYMENT.md docs/ROBOT_VOICE_SESSION.md src/app-home/robot-console-page.js src/features/robot/application/listen-qwen.js src/features/robot/application/model-response.js src/features/robot/application/robot-events.js src/features/robot/application/voice-monitor.js src/features/robot/application/voice-session.js src/integrations/robot-client/client.js src/shared/logging/logger.js progress.md`.

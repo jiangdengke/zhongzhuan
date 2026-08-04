@@ -1,7 +1,7 @@
-import { logInfo, makeTraceId, previewText } from "@/shared/logging/logger.js";
+import { logError, logInfo, logWarn, makeTraceId } from "@/shared/logging/logger.js";
 import { readString } from "@/shared/strings.js";
 import { publishRobotEvent } from "./robot-events.js";
-import { isCurrentVoiceSession } from "./voice-session-state.js";
+import { isCurrentVoiceSession, readVoiceSession } from "./voice-session-state.js";
 
 const MODEL_RESPONSE_STARTED = "1";
 const MODEL_RESPONSE_ENDED = "0";
@@ -12,6 +12,8 @@ const MAX_MODEL_RESPONSE_CONTENT_CHARS = 4096;
 const MAX_MODEL_RESPONSE_TOTAL_CHARS = 64 * 1024;
 const DUPLICATE_RESPONSE_START_WINDOW_MS = 1000;
 const MODEL_RESPONSE_IDLE_TTL_MS = 2 * 60 * 1000;
+const MODEL_RESPONSE_MONITOR_ROUTE = "POST /robot/model/response_monitor";
+const MODEL_RESPONSE_STREAM_ROUTE = "POST /robot/model/Response/stream";
 
 function getModelResponseState() {
   if (!globalThis.__robotModelResponseState) {
@@ -60,6 +62,17 @@ function pruneStaleModelResponses(state, now = Date.now()) {
   for (const [sessionId, response] of state.responsesBySessionId) {
     if (now - response.lastActivityAt > MODEL_RESPONSE_IDLE_TTL_MS) {
       state.responsesBySessionId.delete(sessionId);
+      logWarn("modelResponse", "expired", {
+        direction: "中转内部",
+        robotId: response.robotId,
+        wholeSessionId: sessionId,
+        responseId: response.responseId,
+        chunkCount: response.chunkCount,
+        totalChars: response.content.length,
+        totalDurationMs: now - response.startedAt,
+        outcome: "清理",
+        reason: "模型回复超过两分钟没有新片段",
+      });
     }
   }
 }
@@ -79,7 +92,25 @@ export function forgetModelResponseSession(sessionId) {
     return;
   }
 
-  getModelResponseState().responsesBySessionId.delete(sessionId);
+  const state = getModelResponseState();
+  const activeResponse = state.responsesBySessionId.get(sessionId);
+
+  if (!activeResponse) {
+    return;
+  }
+
+  state.responsesBySessionId.delete(sessionId);
+  logWarn("modelResponse", "interrupted", {
+    direction: "中转内部",
+    robotId: activeResponse.robotId,
+    wholeSessionId: sessionId,
+    responseId: activeResponse.responseId,
+    chunkCount: activeResponse.chunkCount,
+    totalChars: activeResponse.content.length,
+    totalDurationMs: Date.now() - activeResponse.startedAt,
+    outcome: "清理",
+    reason: "整段语音会话已结束",
+  });
 }
 
 export function readActiveModelResponseSnapshots() {
@@ -112,6 +143,22 @@ export function handleModelResponseMonitor(payload, options = {}) {
   }
 
   if (!isCurrentVoiceSession(robotId, sessionId)) {
+    const currentVoiceSession = readVoiceSession(robotId);
+
+    logWarn("modelResponse", "ignored", {
+      direction: "语音服务→中转服务",
+      route: MODEL_RESPONSE_MONITOR_ROUTE,
+      service: "语音服务",
+      traceId,
+      robotId,
+      wholeSessionId: sessionId,
+      activeSessionId: currentVoiceSession?.sessionId,
+      status,
+      statusCode: 200,
+      outcome: "忽略",
+      ignoreReason: "整段会话不是当前活动会话",
+    });
+
     return createResult(200, traceId, {
       ok: true,
       ignored: true,
@@ -134,6 +181,20 @@ export function handleModelResponseMonitor(payload, options = {}) {
       );
 
       if (isImmediateDuplicate) {
+        logWarn("modelResponse", "ignored", {
+          direction: "语音服务→中转服务",
+          route: MODEL_RESPONSE_MONITOR_ROUTE,
+          service: "语音服务",
+          traceId,
+          robotId,
+          wholeSessionId: sessionId,
+          responseId: existingResponse.responseId,
+          status,
+          statusCode: 200,
+          outcome: "忽略",
+          ignoreReason: "重复的模型开始回调",
+        });
+
         return createResult(200, traceId, {
           ok: true,
           ignored: true,
@@ -145,6 +206,17 @@ export function handleModelResponseMonitor(payload, options = {}) {
       }
 
       state.responsesBySessionId.delete(sessionId);
+      logWarn("modelResponse", "interrupted", {
+        direction: "中转内部",
+        traceId,
+        robotId,
+        wholeSessionId: sessionId,
+        responseId: existingResponse.responseId,
+        chunkCount: existingResponse.chunkCount,
+        totalChars: existingResponse.content.length,
+        outcome: "中断",
+        reason: "新的模型开始回调覆盖未结束回复",
+      });
       publishModelResponseEvent("model_response_done", {
         traceId,
         robotId,
@@ -178,11 +250,17 @@ export function handleModelResponseMonitor(payload, options = {}) {
     });
 
     logInfo("modelResponse", "started", {
+      direction: "语音服务→中转服务",
+      route: MODEL_RESPONSE_MONITOR_ROUTE,
+      service: "语音服务",
       traceId,
       robotId,
-      sessionId,
+      wholeSessionId: sessionId,
       responseId,
       status,
+      responseSource: "语音服务侧模型",
+      statusCode: 200,
+      outcome: "已接收",
     });
 
     return createResult(200, traceId, {
@@ -197,6 +275,19 @@ export function handleModelResponseMonitor(payload, options = {}) {
   const activeResponse = state.responsesBySessionId.get(sessionId);
 
   if (!activeResponse) {
+    logWarn("modelResponse", "ignored", {
+      direction: "语音服务→中转服务",
+      route: MODEL_RESPONSE_MONITOR_ROUTE,
+      service: "语音服务",
+      traceId,
+      robotId,
+      wholeSessionId: sessionId,
+      status,
+      statusCode: 200,
+      outcome: "忽略",
+      ignoreReason: "未收到模型开始回调",
+    });
+
     return createResult(200, traceId, {
       ok: true,
       ignored: true,
@@ -218,11 +309,20 @@ export function handleModelResponseMonitor(payload, options = {}) {
   });
 
   logInfo("modelResponse", "completed", {
+    direction: "语音服务→中转服务",
+    route: MODEL_RESPONSE_MONITOR_ROUTE,
+    service: "语音服务",
     traceId,
     robotId,
-    sessionId,
+    wholeSessionId: sessionId,
     responseId: activeResponse.responseId,
     status,
+    responseSource: "语音服务侧模型",
+    statusCode: 200,
+    chunkCount: activeResponse.chunkCount,
+    totalChars: activeResponse.content.length,
+    totalDurationMs: Date.now() - activeResponse.startedAt,
+    outcome: "完成",
   });
 
   return createResult(200, traceId, {
@@ -266,7 +366,26 @@ export function handleModelResponseStream(payload, options = {}) {
     );
   }
 
-  if (!isCurrentVoiceSession(robotId, sessionId) || !content) {
+  const currentVoiceSession = readVoiceSession(robotId);
+  const isActiveVoiceSession = currentVoiceSession?.sessionId === sessionId;
+
+  if (!isActiveVoiceSession || !content) {
+    logWarn("modelResponse", "ignored", {
+      direction: "语音服务→中转服务",
+      route: MODEL_RESPONSE_STREAM_ROUTE,
+      service: "语音服务",
+      traceId,
+      robotId,
+      wholeSessionId: sessionId,
+      activeSessionId: currentVoiceSession?.sessionId,
+      contentLength: typeof content === "string" ? content.length : 0,
+      statusCode: 200,
+      outcome: "忽略",
+      ignoreReason: !isActiveVoiceSession
+        ? "整段会话不是当前活动会话"
+        : "增量内容为空",
+    });
+
     return createResult(200, traceId, {
       ok: true,
       ignored: true,
@@ -280,6 +399,19 @@ export function handleModelResponseStream(payload, options = {}) {
   const activeResponse = state.responsesBySessionId.get(sessionId);
 
   if (!activeResponse) {
+    logWarn("modelResponse", "ignored", {
+      direction: "语音服务→中转服务",
+      route: MODEL_RESPONSE_STREAM_ROUTE,
+      service: "语音服务",
+      traceId,
+      robotId,
+      wholeSessionId: sessionId,
+      contentLength: content.length,
+      statusCode: 200,
+      outcome: "忽略",
+      ignoreReason: "未收到模型开始回调",
+    });
+
     return createResult(200, traceId, {
       ok: true,
       ignored: true,
@@ -289,15 +421,33 @@ export function handleModelResponseStream(payload, options = {}) {
   }
 
   if (activeResponse.content.length + content.length > MAX_MODEL_RESPONSE_TOTAL_CHARS) {
+    logError("modelResponse", "ignored", {
+      direction: "语音服务→中转服务",
+      route: MODEL_RESPONSE_STREAM_ROUTE,
+      service: "语音服务",
+      traceId,
+      robotId,
+      wholeSessionId: sessionId,
+      responseId: activeResponse.responseId,
+      contentLength: content.length,
+      outcome: "拒绝",
+      reason: `累计内容超过 ${MAX_MODEL_RESPONSE_TOTAL_CHARS} 字符上限`,
+    });
+
     return createValidationError(
       traceId,
       `model response must not exceed ${MAX_MODEL_RESPONSE_TOTAL_CHARS} characters`,
     );
   }
 
+  const chunkReceivedAt = Date.now();
   activeResponse.content += content;
   activeResponse.chunkCount += 1;
-  activeResponse.lastActivityAt = Date.now();
+  activeResponse.lastActivityAt = chunkReceivedAt;
+
+  if (activeResponse.chunkCount === 1) {
+    activeResponse.firstChunkLatencyMs = chunkReceivedAt - activeResponse.startedAt;
+  }
 
   publishModelResponseEvent("model_response_delta", {
     traceId,
@@ -308,13 +458,34 @@ export function handleModelResponseStream(payload, options = {}) {
     content,
   });
 
-  logInfo("modelResponse", "delta_received", {
-    traceId,
-    robotId,
-    sessionId,
-    responseId: activeResponse.responseId,
-    contentPreview: previewText(content),
-  });
+  const shouldLogProgress = (
+    activeResponse.chunkCount === 1 ||
+    activeResponse.chunkCount % 10 === 0 ||
+    chunkReceivedAt - (activeResponse.lastProgressLoggedAt ?? activeResponse.startedAt) >= 1000
+  );
+
+  if (shouldLogProgress) {
+    logInfo(
+      "modelResponse",
+      activeResponse.chunkCount === 1 ? "delta_received" : "progress",
+      {
+        direction: "语音服务→中转服务",
+        route: MODEL_RESPONSE_STREAM_ROUTE,
+        service: "语音服务",
+        traceId,
+        robotId,
+        wholeSessionId: sessionId,
+        responseId: activeResponse.responseId,
+        contentLength: content.length,
+        receivedChunkCount: activeResponse.chunkCount,
+        totalChars: activeResponse.content.length,
+        firstChunkLatencyMs: activeResponse.firstChunkLatencyMs,
+        statusCode: 200,
+        outcome: "已接收",
+      },
+    );
+    activeResponse.lastProgressLoggedAt = chunkReceivedAt;
+  }
 
   return createResult(200, traceId, {
     ok: true,

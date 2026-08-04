@@ -4,7 +4,7 @@ import {
   sendVoiceSessionControl,
 } from "@/integrations/robot-client/client.js";
 import { robotClientConfig } from "@/integrations/robot-client/config.js";
-import { logError, logInfo, makeTraceId } from "@/shared/logging/logger.js";
+import { logError, logInfo, logWarn, makeTraceId } from "@/shared/logging/logger.js";
 import { readString } from "@/shared/strings.js";
 import { forgetModelResponseSession } from "./model-response.js";
 import {
@@ -44,6 +44,15 @@ async function startVoiceSession({ robotId, traceId }) {
   const currentSession = readVoiceSession(robotId);
   const sessionId = currentSession?.sessionId ?? createVoiceSessionId();
 
+  logInfo("voiceSession", currentSession ? "session_reused" : "session_created", {
+    direction: "中转内部",
+    traceId,
+    robotId,
+    wholeSessionId: sessionId,
+    status: VOICE_SESSION_STARTED,
+    association: currentSession ? "上次启动失败后的重试" : "首次点击开始",
+  });
+
   rememberVoiceSession({
     robotId,
     sessionId,
@@ -52,9 +61,12 @@ async function startVoiceSession({ robotId, traceId }) {
   });
 
   logInfo("voiceSession", "control_sending", {
+    direction: "中转服务→语音服务",
     traceId,
+    route: "POST /robot/voiceSession/control",
+    service: "语音服务",
     robotId,
-    sessionId,
+    wholeSessionId: sessionId,
     status: VOICE_SESSION_STARTED,
     target: getRobotVoiceSessionControlTarget(),
     timeoutMs: robotClientConfig.timeoutMs,
@@ -70,9 +82,12 @@ async function startVoiceSession({ robotId, traceId }) {
     });
   } catch (error) {
     logError("voiceSession", "control_failed", {
+      direction: "语音服务→中转服务",
       traceId,
+      route: "POST /robot/voiceSession/control",
+      service: "语音服务",
       robotId,
-      sessionId,
+      wholeSessionId: sessionId,
       status: VOICE_SESSION_STARTED,
       target: error.targetUrl ?? getRobotVoiceSessionControlTarget(),
       durationMs: error.durationMs,
@@ -83,9 +98,23 @@ async function startVoiceSession({ robotId, traceId }) {
 
     return createResult(502, traceId, {
       ok: false,
-      error: "机器人客户端暂时不可用",
+      error: "语音服务暂时不可用",
     });
   }
+
+  logInfo("voiceSession", "forward_succeeded", {
+    direction: "语音服务→中转服务",
+    traceId,
+    route: "POST /robot/voiceSession/control",
+    service: "语音服务",
+    robotId,
+    wholeSessionId: sessionId,
+    status: VOICE_SESSION_STARTED,
+    statusCode: controlResult.status,
+    target: controlResult.targetUrl,
+    durationMs: controlResult.durationMs,
+    outcome: "已接收",
+  });
 
   rememberVoiceSession({
     robotId,
@@ -95,9 +124,10 @@ async function startVoiceSession({ robotId, traceId }) {
   });
 
   logInfo("voiceSession", "started", {
+    direction: "中转内部",
     traceId,
     robotId,
-    sessionId,
+    wholeSessionId: sessionId,
     status: VOICE_SESSION_STARTED,
     target: controlResult.targetUrl,
     durationMs: controlResult.durationMs,
@@ -115,6 +145,16 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
   const currentSession = readVoiceSession(robotId);
 
   if (isEndedVoiceSession(requestedSessionId)) {
+    logWarn("voiceSession", "ignored", {
+      direction: "页面→中转服务",
+      traceId,
+      robotId,
+      wholeSessionId: requestedSessionId,
+      status: VOICE_SESSION_ENDED,
+      outcome: "忽略",
+      ignoreReason: "重复结束请求已处理",
+    });
+
     return createResult(200, traceId, {
       ok: true,
       ignored: true,
@@ -125,6 +165,16 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
   }
 
   if (currentSession && currentSession.sessionId !== requestedSessionId) {
+    logWarn("voiceSession", "conflict", {
+      direction: "页面→中转服务",
+      traceId,
+      robotId,
+      wholeSessionId: requestedSessionId,
+      association: `当前活动会话=${currentSession.sessionId}`,
+      outcome: "冲突",
+      reason: "结束会话标识不一致",
+    });
+
     return createResult(409, traceId, {
       ok: false,
       error: "会话标识与当前语音会话不一致",
@@ -132,6 +182,15 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
   }
 
   if (!currentSession) {
+    logWarn("voiceSession", "conflict", {
+      direction: "页面→中转服务",
+      traceId,
+      robotId,
+      wholeSessionId: requestedSessionId,
+      outcome: "冲突",
+      reason: "当前没有活动会话",
+    });
+
     return createResult(409, traceId, {
       ok: false,
       error: "当前没有可结束的语音会话",
@@ -139,9 +198,12 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
   }
 
   logInfo("voiceSession", "control_sending", {
+    direction: "中转服务→语音服务",
     traceId,
+    route: "POST /robot/voiceSession/control",
+    service: "语音服务",
     robotId,
-    sessionId: requestedSessionId,
+    wholeSessionId: requestedSessionId,
     status: VOICE_SESSION_ENDED,
     target: getRobotVoiceSessionControlTarget(),
     timeoutMs: robotClientConfig.timeoutMs,
@@ -157,9 +219,12 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
     });
   } catch (error) {
     logError("voiceSession", "control_failed", {
+      direction: "语音服务→中转服务",
       traceId,
+      route: "POST /robot/voiceSession/control",
+      service: "语音服务",
       robotId,
-      sessionId: requestedSessionId,
+      wholeSessionId: requestedSessionId,
       status: VOICE_SESSION_ENDED,
       target: error.targetUrl ?? getRobotVoiceSessionControlTarget(),
       durationMs: error.durationMs,
@@ -170,17 +235,32 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
 
     return createResult(502, traceId, {
       ok: false,
-      error: "机器人客户端暂时不可用",
+      error: "语音服务暂时不可用",
     });
   }
+
+  logInfo("voiceSession", "forward_succeeded", {
+    direction: "语音服务→中转服务",
+    traceId,
+    route: "POST /robot/voiceSession/control",
+    service: "语音服务",
+    robotId,
+    wholeSessionId: requestedSessionId,
+    status: VOICE_SESSION_ENDED,
+    statusCode: controlResult.status,
+    target: controlResult.targetUrl,
+    durationMs: controlResult.durationMs,
+    outcome: "已接收",
+  });
 
   markVoiceSessionEnded({ robotId, sessionId: requestedSessionId });
   forgetModelResponseSession(requestedSessionId);
 
   logInfo("voiceSession", "ended", {
+    direction: "中转内部",
     traceId,
     robotId,
-    sessionId: requestedSessionId,
+    wholeSessionId: requestedSessionId,
     status: VOICE_SESSION_ENDED,
     target: controlResult.targetUrl,
     durationMs: controlResult.durationMs,
@@ -203,7 +283,7 @@ export async function handleVoiceSessionControl(payload, options = {}) {
   if (robotId !== robotClientConfig.robotId) {
     return createResult(403, traceId, {
       ok: false,
-      error: "robotId 与当前机器人配置不一致",
+      error: "robotId 与当前终端配置不一致",
     });
   }
 

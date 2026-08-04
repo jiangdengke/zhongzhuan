@@ -8,6 +8,9 @@ import { publishRobotEvent } from "./robot-events.js";
 
 export function createInvalidListenJsonResult({ requestId = makeTraceId("listen"), startedAt = Date.now() } = {}) {
   logError("listenQwen", "invalid_json", {
+    direction: "语音服务→中转服务",
+    route: "POST /robot/listenQwen",
+    service: "语音服务",
     traceId: requestId,
     durationMs: Date.now() - startedAt,
   });
@@ -32,27 +35,32 @@ export async function handleListenQwen(payload, options = {}, dependencies = {})
   const getConversationReplyStream = dependencies.getConversationReplyStream ?? getDeepSeekReplyStream;
   const request = normalizeListenPayload(payload, requestId);
 
-  logInfo("listenQwen", "request_received", {
-    traceId: request.traceId,
-    requestId,
-    robotId: request.robotId,
-    event: request.event,
-    language: request.language,
-    sessionId: request.sessionId,
-    functionName: request.functionName,
-    contentPreview: previewText(request.content, 120),
-    functionParamPreview: previewText(typeof request.functionParam === "string" ? request.functionParam : "", 120),
-    hasFunctionParam: request.functionParam !== undefined && request.functionParam !== null,
-    stream: false,
-  });
+  if (request.event !== ROBOT_EVENTS.asrPartial) {
+    logInfo("listenQwen", "request_received", {
+      direction: "语音服务→中转服务",
+      route: "POST /robot/listenQwen",
+      service: "语音服务",
+      traceId: requestId,
+      utteranceSessionId: request.sessionId,
+      robotId: request.robotId,
+      event: request.event,
+      language: request.language,
+      functionName: request.functionName,
+      contentPreview: previewText(request.content, 120),
+      functionParamPreview: previewText(typeof request.functionParam === "string" ? request.functionParam : "", 120),
+      hasFunctionParam: request.functionParam !== undefined && request.functionParam !== null,
+      stream: false,
+    });
+  }
 
   if (request.event === ROBOT_EVENTS.speechContext) {
     const cachedCommand = readCommandSession(request.sessionId);
 
     if (cachedCommand) {
       logInfo("listenQwen", "skip_speech_after_cmd", {
-        traceId: request.traceId,
-        sessionId: request.sessionId,
+        direction: "中转内部",
+        traceId: requestId,
+        utteranceSessionId: request.sessionId,
         robotId: request.robotId,
         functionName: cachedCommand.functionName,
         durationMs: Date.now() - startedAt,
@@ -105,8 +113,9 @@ export async function handleListenQwen(payload, options = {}, dependencies = {})
       rememberCommandSession(commandRequest, commandReply);
 
       logInfo("listenQwen", "redirect_speech_to_cmd", {
-        traceId: request.traceId,
-        sessionId: request.sessionId,
+        direction: "中转内部",
+        traceId: requestId,
+        utteranceSessionId: request.sessionId,
         robotId: request.robotId,
         functionName: commandRequest.functionName,
         durationMs: Date.now() - startedAt,
@@ -162,8 +171,9 @@ export async function handleListenQwen(payload, options = {}, dependencies = {})
     }
 
     logInfo("listenQwen", "response_ready", {
-      traceId: request.traceId,
-      sessionId: request.sessionId,
+      direction: "中转内部",
+      traceId: requestId,
+      utteranceSessionId: request.sessionId,
       robotId: request.robotId,
       event: request.event,
       durationMs: Date.now() - startedAt,
@@ -201,11 +211,16 @@ export async function handleListenQwen(payload, options = {}, dependencies = {})
     });
 
     logInfo("listenQwen", "asr_partial_received", {
-      traceId: request.traceId,
-      sessionId: request.sessionId,
+      direction: "语音服务→中转服务",
+      route: "POST /robot/listenQwen",
+      service: "语音服务",
+      traceId: requestId,
+      utteranceSessionId: request.sessionId,
       robotId: request.robotId,
       language: request.language,
+      event: request.event,
       contentPreview: previewText(request.content, 120),
+      contentLength: request.content.length,
       durationMs: Date.now() - startedAt,
       stream: false,
     });
@@ -234,8 +249,9 @@ export async function handleListenQwen(payload, options = {}, dependencies = {})
     rememberCommandSession(request, commandReply);
 
     logInfo("listenQwen", "branch_cmd", {
-      traceId: request.traceId,
-      sessionId: request.sessionId,
+      direction: "中转内部",
+      traceId: requestId,
+      utteranceSessionId: request.sessionId,
       robotId: request.robotId,
       functionName: request.functionName,
       commandOk: commandReply.ok,
@@ -263,8 +279,11 @@ export async function handleListenQwen(payload, options = {}, dependencies = {})
   }
 
   logError("listenQwen", "unknown_event", {
-    traceId: request.traceId,
-    sessionId: request.sessionId,
+    direction: "语音服务→中转服务",
+    route: "POST /robot/listenQwen",
+    service: "语音服务",
+    traceId: requestId,
+    utteranceSessionId: request.sessionId,
     robotId: request.robotId,
     event: request.event,
     durationMs: Date.now() - startedAt,
