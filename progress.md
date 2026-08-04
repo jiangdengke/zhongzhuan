@@ -357,3 +357,39 @@
 - `.trellis/tasks/08-04-robot-voice-session-integration/task.json`: expands task scope to include the shared logger retention implementation.
 - `progress.md`: records the persistent-log correction and supersedes the preceding stdout-only log lifecycle.
 - Rollback: remove `LOG_FILE_RETENTION_DAYS` and retention pruning, remove the named log volume and file-log environment overrides from Compose, and restore the stdout-only logging description from the immediately preceding entry.
+
+## 2026-08-04 - Task: fix voice control behind request-rewriting proxies
+### What was done
+- Removed the redundant Origin and Fetch Metadata rejection that treated legitimate microphone clicks as cross-origin when an IDE or reverse proxy rewrote backend request metadata.
+- Retained browser cross-origin protection through the endpoint's required JSON media type and absent CORS authorization, while continuing to reject simple form submissions before voice-session handling.
+- Documented the supported reverse-proxy behavior and the requirement not to add permissive CORS headers to the browser control endpoint.
+
+### Testing
+- Reproduced the original 403 response for a legitimate request whose public Origin differed from the backend request URL.
+- Verified proxied start and stop controls both returned HTTP 200, reached a temporary robot-client mock on port `9000`, and preserved one whole-session ID.
+- Verified cross-origin OPTIONS returned no `Access-Control-Allow-Origin` header and a form-encoded POST returned HTTP 415.
+- `npm run build`, `git diff --check`, IDE diagnostics, and focused read-only security review all passed.
+
+### Notes
+- `app/api/voice-session/control/route.js`: removes the proxy-sensitive duplicate same-origin check while retaining strict bounded JSON parsing and payload validation.
+- `docs/ROBOT_VOICE_SESSION.md`: explains the JSON and CORS boundary for browser voice control.
+- `docs/DOCKER_DEPLOYMENT.md`: documents reverse-proxy compatibility and warns against permissive CORS configuration.
+- `progress.md`: records the root cause, security rationale, verification evidence, and rollback point.
+- Rollback: restore `isSameOriginBrowserRequest` and its early 403 response in the browser control route, then remove the new proxy/CORS documentation; this also restores the original false rejection behind request-rewriting proxies.
+
+## 2026-08-04 - Task: standardize the Compose container name
+### What was done
+- Fixed the Compose container name and local image name to `zhongzhuan` instead of relying on the generated project-service suffix or the previous misspelled image name.
+- Documented the names operators should see after rebuilding the service.
+
+### Testing
+- `docker compose config --quiet` passed.
+- Parsed Compose output confirmed container `zhongzhuan`, image `zhongzhuan:latest`, and host port `4000` mapped to container port `4000`.
+- Repository search confirmed the obsolete cross-origin error text is no longer present.
+- `git diff --check` passed.
+
+### Notes
+- `docker-compose.yml`: sets the fixed container and image names to `zhongzhuan`.
+- `docs/DOCKER_DEPLOYMENT.md`: documents the expected Compose container and image names.
+- `progress.md`: records the naming change, verification evidence, and rollback point.
+- Rollback: remove `container_name`, restore the previous image name, and remove the container-name sentence from the deployment guide.

@@ -16,6 +16,8 @@ The robot client must therefore listen on `localhost:9000`, `127.0.0.1:9000`, or
 
 The browser never calls the robot client directly. The transit server forwards the control request so the robot address stays out of browser code and cross-origin restrictions do not apply.
 
+The internal browser control endpoint accepts only `application/json` and does not grant cross-origin browser access. This keeps cross-site requests behind the browser's CORS preflight while allowing deployments where a reverse proxy rewrites the backend host or request metadata.
+
 ## Whole-session control
 
 The page calls the internal endpoint:

@@ -1,9 +1,10 @@
 services:
   transit-server:
+    container_name: zhongzhuan
     build:
       context: .
       dockerfile: Dockerfile
-    image: zhongzhauan:latest
+    image: zhongzhuan:latest
     restart: unless-stopped
     ports:
       - "4000:4000"

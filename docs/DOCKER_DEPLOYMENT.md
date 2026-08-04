@@ -36,6 +36,8 @@ Build and start the service:
 docker compose up -d --build
 ```
 
+The Compose service creates the container as `zhongzhuan` from the local image `zhongzhuan:latest`.
+
 Check its status and logs:
 
 ```bash
@@ -57,6 +59,12 @@ curl http://127.0.0.1:4000/
 ```
 
 The container runs Next.js on `0.0.0.0:4000`, and Compose publishes it as host port `4000`.
+
+## Reverse proxy
+
+A reverse proxy may expose the application through a domain or HTTPS endpoint and forward traffic to host port `4000`. The browser control endpoint does not require the proxy's internal host to match the public browser origin.
+
+Keep the page and `/api/voice-session/control` under the same public origin. Do not add permissive CORS response headers for this endpoint; its strict `application/json` request format relies on the browser rejecting unauthorized cross-origin preflight requests.
 
 ## Dependency security status
 
@@ -100,7 +108,7 @@ The listener should not be limited to `127.0.0.1:9000` for this topology.
 Find the Compose network subnet:
 
 ```bash
-docker network inspect zhongzhauan_default \
+docker network inspect zhongzhuan_default \
   --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
 ```
 
