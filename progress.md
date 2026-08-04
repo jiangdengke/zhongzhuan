@@ -489,3 +489,44 @@
 - `src/features/robot/application/model-response.js`: resolves the active whole session by `robotId`, accepts missing or local callback IDs, and propagates the optional turn ID through model events and snapshots.
 - `progress.md`: records the revised protocol behavior, runtime evidence, file scope, and rollback point.
 - Rollback: run `git restore --source=49b4076 -- app/robot/model/Response/stream/route.js app/robot/model/response_monitor/route.js docs/DOCKER_DEPLOYMENT.md docs/ROBOT_VOICE_SESSION.md src/features/robot/application/model-response.js progress.md`; this restores strict whole-session matching and makes callback `sessionId` mandatory again.
+
+## 2026-08-04 - Task: simplify voice-chain operational logs
+### What was done
+- Replaced verbose pretty-mode success records with compact business events for voice-session start/end, ASR text, each real model fragment, and reply completion summaries.
+- Preserved exact ASR and model-fragment content; both voice-service model callbacks and transit-side DeepSeek streams now use the same `识别`, `回复+`, and `回复完成` vocabulary.
+- Kept warning and error diagnostics concise but actionable, with eight-character identifiers and relevant terminal, turn, HTTP, timing, network, and trace fields.
+- Suppressed repeated pretty-mode transport and page-push success records while leaving JSON mode structurally complete for detailed diagnosis.
+- Updated integration and deployment documentation with the new output format and the one-upstream-fragment-to-one-log-line rule.
+
+### Testing
+- `npm run build` passed with all application routes compiled, linted, and type-checked.
+- `git diff --check` passed.
+- IDE diagnostics reported no issues in the changed JavaScript files.
+- A direct pretty-mode preview produced the expected compact session, ASR, two model-fragment, completion, warning, and voice-service failure lines.
+- A JSON-mode preview retained full direction, route, trace ID, whole-session ID, turn ID, terminal ID, and model content values.
+
+### Notes
+- `src/shared/logging/logger.js`: owns compact pretty formatting, duplicate success suppression, diagnostic field selection, and eight-character display IDs; JSON records remain unabridged.
+- `src/features/robot/application/listen-qwen.js`: includes the complete ASR text in its structured recognition record.
+- `src/features/robot/application/model-response.js`: logs every accepted voice-service HTTP model fragment with its exact content instead of sampling progress.
+- `src/features/robot/application/voice-session.js`: records whole-session duration for the compact stop summary.
+- `src/integrations/deepseek/client.js`: emits the same compact fragment stream for transit-side DeepSeek replies and promotes missing credentials to a warning.
+- `docs/DOCKER_DEPLOYMENT.md` and `docs/ROBOT_VOICE_SESSION.md`: document compact logs, full JSON mode, and real streaming semantics.
+- Rollback: restore the changed source and documentation files listed above together with this progress entry; doing so restores verbose pretty logs and sampled model-fragment logging.
+
+## 2026-08-04 - Task: keep live conversation and voice status visible
+### What was done
+- Constrained the customer-facing chat card to the current viewport so conversation growth no longer extends the whole browser page.
+- Made the conversation list the dedicated scroll area and automatically followed every ASR replacement, new message, and streamed reply fragment.
+- Kept the waveform and voice status panel in its reserved bottom area while preserving existing voice controls and event behavior.
+
+### Testing
+- `npm run build` passed, including the Next.js production compile, lint, type validation, and route generation.
+- `git diff --check` passed.
+- IDE diagnostics reported no errors for the changed page component.
+- Browser visual verification remains pending on the user's active display; the viewport and flex constraints were checked directly in the component styles.
+
+### Notes
+- `src/app-home/robot-console-page.js`: added message-container auto-scroll and constrained the desktop and mobile flex layout to the viewport.
+- `progress.md`: records implementation scope, verification evidence, and rollback guidance.
+- Rollback: restore `src/app-home/robot-console-page.js` to remove automatic message following and return to page-level growth, then remove this progress entry.

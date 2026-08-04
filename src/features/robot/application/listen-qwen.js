@@ -219,6 +219,7 @@ export async function handleListenQwen(payload, options = {}, dependencies = {})
       robotId: request.robotId,
       language: request.language,
       event: request.event,
+      content: request.content,
       contentPreview: previewText(request.content, 120),
       contentLength: request.content.length,
       durationMs: Date.now() - startedAt,

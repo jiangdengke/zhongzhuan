@@ -484,35 +484,23 @@ export function handleModelResponseStream(payload, options = {}) {
     content,
   });
 
-  const shouldLogProgress = (
-    activeResponse.chunkCount === 1 ||
-    activeResponse.chunkCount % 10 === 0 ||
-    chunkReceivedAt - (activeResponse.lastProgressLoggedAt ?? activeResponse.startedAt) >= 1000
-  );
-
-  if (shouldLogProgress) {
-    logInfo(
-      "modelResponse",
-      activeResponse.chunkCount === 1 ? "delta_received" : "progress",
-      {
-        direction: "语音服务→中转服务",
-        route: MODEL_RESPONSE_STREAM_ROUTE,
-        service: "语音服务",
-        traceId,
-        robotId,
-        wholeSessionId,
-        turnId: callbackSessionId || activeResponse.turnId,
-        responseId: activeResponse.responseId,
-        contentLength: content.length,
-        receivedChunkCount: activeResponse.chunkCount,
-        totalChars: activeResponse.content.length,
-        firstChunkLatencyMs: activeResponse.firstChunkLatencyMs,
-        statusCode: 200,
-        outcome: "已接收",
-      },
-    );
-    activeResponse.lastProgressLoggedAt = chunkReceivedAt;
-  }
+  logInfo("modelResponse", "delta_received", {
+    direction: "语音服务→中转服务",
+    route: MODEL_RESPONSE_STREAM_ROUTE,
+    service: "语音服务",
+    traceId,
+    robotId,
+    wholeSessionId,
+    turnId: callbackSessionId || activeResponse.turnId,
+    responseId: activeResponse.responseId,
+    content,
+    contentLength: content.length,
+    receivedChunkCount: activeResponse.chunkCount,
+    totalChars: activeResponse.content.length,
+    firstChunkLatencyMs: activeResponse.firstChunkLatencyMs,
+    statusCode: 200,
+    outcome: "已接收",
+  });
 
   return createResult(200, traceId, {
     ok: true,

@@ -253,6 +253,7 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
     outcome: "已接收",
   });
 
+  const endedAt = Date.now();
   markVoiceSessionEnded({ robotId, sessionId: requestedSessionId });
   forgetModelResponseSession(requestedSessionId);
 
@@ -264,6 +265,7 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
     status: VOICE_SESSION_ENDED,
     target: controlResult.targetUrl,
     durationMs: controlResult.durationMs,
+    sessionDurationMs: endedAt - currentSession.startedAt,
   });
 
   return createResult(200, traceId, {

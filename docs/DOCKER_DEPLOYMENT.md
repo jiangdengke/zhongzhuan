@@ -52,17 +52,25 @@ The container keeps two bounded log destinations:
 
 The named volume survives application container recreation, while the retention settings prevent historical files from accumulating indefinitely.
 
-Application logs use the default `LOG_FORMAT=pretty` format so they can be read directly from Docker without a JSON viewer. Each line contains a Chinese module name, one status emoji, and pipe-separated fields:
+Application logs use the default `LOG_FORMAT=pretty` format so they can be read directly from Docker without a JSON viewer. Successful requests are collapsed into a small set of business events while recognized text and every real model fragment remain visible:
 
 ```text
-2026-08-04 06:20:31.245 INFO  [会话控制][页面→中转服务] 📥 收到页面控制请求 | 状态=1 | 动作=开始 | 接口="POST /api/voice-session/control"
-2026-08-04 06:20:31.248 INFO  [会话控制][中转服务→语音服务] 📤 下发语音控制指令 | 会话=session-b506... | 终端=4 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 超时=5000ms
-2026-08-04 06:20:31.251 INFO  [会话控制][语音服务→中转服务] ✅ 语音服务已接收控制指令 | 会话=session-b506... | 终端=4 | HTTP=200 | 耗时=3ms
-2026-08-04 06:20:31.252 INFO  [会话控制][中转服务→页面] 📤 返回页面控制结果 | 会话=session-b506... | 动作=开始 | 结果=成功 | HTTP=200
-2026-08-04 06:20:36.247 ERROR [会话控制][语音服务→中转服务] ❌ 下发语音控制失败 | 会话=session-b506... | 终端=4 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT
+09:03:01.120 INFO  🎙️ 会话开始
+09:03:12.916 INFO  🎤 识别 | "你好，你能帮我做什么？"
+09:03:13.014 INFO  💬 回复+ | "您好，"
+09:03:13.036 INFO  💬 回复+ | "我可以帮您"
+09:03:13.145 INFO  ✅ 回复完成 | 8片 48字 244ms
+09:03:26.182 INFO  🛑 会话结束 | 25.1s
 ```
 
-The application enriches voice-service failures with the target address, elapsed time, timeout classification, and low-level network code when the runtime provides them. Model callbacks are associated with the current whole session by `robotId`; an optional voice-service `sessionId` is logged as `话轮` and is not compared with the whole-session ID. Logs report explicit ignore reasons when `/robot/model/Response/stream` arrives before its start callback or while the terminal has no active whole session. View the same readable output with:
+One `回复+` line represents one fragment actually received from DeepSeek or `/robot/model/Response/stream`; the transit service does not invent character-level fragments. Warnings and errors expand only the fields needed for diagnosis, and displayed identifiers are shortened to eight characters:
+
+```text
+09:03:13.145 WARN  ⚠️ 回调忽略 | 终端=4 | 话轮=9c1ae54c | 原因=未收到模型开始回调
+09:03:13.146 ERROR ❌ 语音服务请求失败 | 会话=b492d50e | HTTP=502 | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT | 追踪=a4623f8d
+```
+
+Set `LOG_FORMAT=json` when complete structured records are required. JSON mode retains directions, routes, services, full identifiers, HTTP metadata, timing fields, and content. Model callbacks are associated with the current whole session by `robotId`; an optional voice-service `sessionId` is retained as `话轮` and is not compared with the whole-session ID. View the readable output with:
 
 ```bash
 docker logs --tail 100 -f zhongzhuan

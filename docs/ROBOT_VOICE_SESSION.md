@@ -131,11 +131,11 @@ Sending only `POST /robot/model/Response/stream` is not sufficient. The voice se
 Readable logs distinguish these cases explicitly:
 
 ```text
-[模型回复][语音服务→中转服务] ⚠️ 忽略模型回调 | 终端=4 | 忽略原因=当前终端没有活动的整段会话
-[模型回复][语音服务→中转服务] ⚠️ 忽略模型回调 | 会话=<active> | 终端=4 | 忽略原因=未收到模型开始回调
+09:03:13.145 WARN  ⚠️ 回调忽略 | 终端=4 | 话轮=9c1ae54c | 原因=当前终端没有活动的整段会话
+09:03:13.146 WARN  ⚠️ 回调忽略 | 终端=4 | 会话=b492d50e | 原因=未收到模型开始回调
 ```
 
-Successful model increments are sampled in application logs to avoid one line per token: the first fragment, periodic progress, and the completion summary are logged. Every accepted fragment is still delivered through SSE.
+Pretty logs print the exact `content` of every accepted HTTP increment as one `💬 回复+` line, followed by a compact fragment, character, and duration summary. The logger does not split one HTTP callback into artificial fragments. Set `LOG_FORMAT=json` to retain complete structured metadata such as full identifiers, direction, route, HTTP status, and trace ID.
 
 ASR partial results continue to replace the current user transcript, but the page displays only the recognized text and no longer adds a persistent `正在识别：` prefix.
 

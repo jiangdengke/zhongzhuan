@@ -1,5 +1,5 @@
 import { deepseekConfig } from "./config.js";
-import { formatError, logError, logInfo, previewText } from "@/shared/logging/logger.js";
+import { formatError, logError, logInfo, logWarn, previewText } from "@/shared/logging/logger.js";
 
 const FALLBACK_REPLY = "抱歉，我现在暂时无法处理这个请求，请稍后再试。";
 
@@ -18,6 +18,15 @@ function buildMessages(content) {
 
 function normalizeBaseUrl(baseUrl) {
   return baseUrl.replace(/\/+$/, "");
+}
+
+function logFallbackReply({ traceId, sessionId, stream }) {
+  logInfo("deepseek", "delta_received", {
+    traceId,
+    sessionId,
+    content: FALLBACK_REPLY,
+    stream,
+  });
 }
 
 function limitReplyLength(text) {
@@ -115,12 +124,14 @@ export async function getDeepSeekReply(content, context = {}) {
   });
 
   if (!apiKey) {
-    logInfo("deepseek", "api_key_missing", {
+    logWarn("deepseek", "api_key_missing", {
       traceId,
       sessionId,
       durationMs: Date.now() - startedAt,
+      reason: "未配置 DEEPSEEK_API_KEY",
       stream: false,
     });
+    logFallbackReply({ traceId, sessionId, stream: false });
     return FALLBACK_REPLY;
   }
 
@@ -158,6 +169,7 @@ export async function getDeepSeekReply(content, context = {}) {
         durationMs: Date.now() - startedAt,
         stream: false,
       });
+      logFallbackReply({ traceId, sessionId, stream: false });
       return FALLBACK_REPLY;
     }
 
@@ -165,6 +177,7 @@ export async function getDeepSeekReply(content, context = {}) {
     const answer = data?.choices?.[0]?.message?.content;
 
     if (typeof answer !== "string") {
+      logFallbackReply({ traceId, sessionId, stream: false });
       return FALLBACK_REPLY;
     }
 
@@ -176,6 +189,7 @@ export async function getDeepSeekReply(content, context = {}) {
       traceId,
       sessionId,
       durationMs: Date.now() - startedAt,
+      content: limited,
       answerPreview: previewText(limited, 120),
       answerLength: trimmed.length,
       returnedLength: Array.from(limited).length,
@@ -191,6 +205,7 @@ export async function getDeepSeekReply(content, context = {}) {
       error: formatError(error),
       stream: false,
     });
+    logFallbackReply({ traceId, sessionId, stream: false });
     return FALLBACK_REPLY;
   }
 }
@@ -212,12 +227,14 @@ export async function* getDeepSeekReplyStream(content, context = {}) {
   });
 
   if (!apiKey) {
-    logInfo("deepseek", "api_key_missing", {
+    logWarn("deepseek", "api_key_missing", {
       traceId,
       sessionId,
       durationMs: Date.now() - startedAt,
+      reason: "未配置 DEEPSEEK_API_KEY",
       stream: true,
     });
+    logFallbackReply({ traceId, sessionId, stream: true });
     yield FALLBACK_REPLY;
     return;
   }
@@ -260,6 +277,7 @@ export async function* getDeepSeekReplyStream(content, context = {}) {
         durationMs: Date.now() - startedAt,
         stream: true,
       });
+      logFallbackReply({ traceId, sessionId, stream: true });
       yield FALLBACK_REPLY;
       return;
     }
@@ -299,6 +317,13 @@ export async function* getDeepSeekReplyStream(content, context = {}) {
             if (limited.text) {
               answer += limited.text;
               chunkCount += 1;
+              logInfo("deepseek", "delta_received", {
+                traceId,
+                sessionId,
+                content: limited.text,
+                receivedChunkCount: chunkCount,
+                stream: true,
+              });
               yield limited.text;
             }
 
@@ -340,6 +365,7 @@ export async function* getDeepSeekReplyStream(content, context = {}) {
       error: formatError(error),
       stream: true,
     });
+    logFallbackReply({ traceId, sessionId, stream: true });
     yield FALLBACK_REPLY;
   }
 }

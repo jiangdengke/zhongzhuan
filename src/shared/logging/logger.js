@@ -19,15 +19,6 @@ const LOG_FILE_MAX_BACKUPS = Number(process.env.LOG_FILE_MAX_BACKUPS ?? 5);
 const LOG_FILE_RETENTION_DAYS = Number(process.env.LOG_FILE_RETENTION_DAYS ?? 7);
 let lastLogRetentionPruneDay = "";
 
-const SCOPE_LABELS = {
-  voiceMonitor: "语音状态",
-  listenQwen: "语音识别",
-  deepseek: "DeepSeek",
-  voiceSession: "会话控制",
-  modelResponse: "模型回复",
-  robotEvents: "页面推送",
-};
-
 const MESSAGE_LABELS = {
   voiceMonitor: {
     request_received: "📥 收到语音服务状态回调",
@@ -56,6 +47,7 @@ const MESSAGE_LABELS = {
     request_success: "✅ DeepSeek 请求完成",
     request_exception: "❌ DeepSeek 请求失败",
     first_delta: "📥 收到 DeepSeek 首片",
+    delta_received: "⏳ 收到 DeepSeek 增量",
   },
   voiceSession: {
     request_received: "📥 收到页面控制请求",
@@ -66,7 +58,7 @@ const MESSAGE_LABELS = {
     forward_started: "📤 下发语音控制指令",
     forward_succeeded: "✅ 语音服务已接收控制指令",
     control_sending: "📤 下发语音控制指令",
-    control_failed: "❌ 下发语音控制失败",
+    control_failed: "❌ 语音服务请求失败",
     started: "✅ 整段会话已进入活动状态",
     ended: "🛑 整段会话已结束",
     state_changed: "🔄 整段会话状态已更新",
@@ -79,7 +71,7 @@ const MESSAGE_LABELS = {
     completed: "✅ 模型输出完成",
     delta_received: "⏳ 收到模型增量",
     progress: "⏳ 模型输出中",
-    ignored: "⚠️ 忽略模型回调",
+    ignored: "⚠️ 回调忽略",
     interrupted: "⚠️ 模型回复被中断",
     expired: "⚠️ 模型回复已过期清理",
     response_sent: "📤 返回模型回调结果",
@@ -92,13 +84,6 @@ const MESSAGE_LABELS = {
     snapshot_sent: "📤 已发送模型回复快照",
     listener_failed: "❌ 页面推送监听器失败",
   },
-};
-
-const DEFAULT_DIRECTIONS = {
-  voiceMonitor: "语音服务→中转服务",
-  listenQwen: "语音服务→中转服务",
-  modelResponse: "语音服务→中转服务",
-  robotEvents: "中转服务→页面",
 };
 
 const KEY_LABELS = {
@@ -125,10 +110,11 @@ const KEY_LABELS = {
   outcome: "结果",
   reason: "原因",
   ignored: "已忽略",
-  ignoreReason: "忽略原因",
+  ignoreReason: "原因",
   association: "关联",
   functionName: "函数",
   model: "模型",
+  content: "内容",
   contentPreview: "内容",
   functionParamPreview: "参数",
   language: "语言",
@@ -159,6 +145,7 @@ const KEY_LABELS = {
   snapshotCount: "快照数",
   connectionId: "连接",
   connectionDurationMs: "连接时长",
+  sessionDurationMs: "会话时长",
   queueWaitMs: "排队耗时",
   stream: "模式",
   wasTruncated: "已截断",
@@ -338,11 +325,8 @@ function padNumber(value, width = 2) {
   return String(value).padStart(width, "0");
 }
 
-function formatTimestamp(date) {
-  return [
-    `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}`,
-    `${padNumber(date.getHours())}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(date.getMilliseconds(), 3)}`,
-  ].join(" ");
+function formatLogTime(date) {
+  return `${padNumber(date.getHours())}:${padNumber(date.getMinutes())}:${padNumber(date.getSeconds())}.${padNumber(date.getMilliseconds(), 3)}`;
 }
 
 function getLogFilePath(date) {
@@ -359,34 +343,23 @@ function readableMessage(scope, message) {
   return MESSAGE_LABELS[scope]?.[message] ?? message;
 }
 
-function readableDirection(scope, message, direction) {
-  if (direction) {
-    return direction;
-  }
-
-  if (scope === "deepseek") {
-    return message === "response_received" || message === "request_success"
-      ? "DeepSeek→中转服务"
-      : "中转服务→DeepSeek";
-  }
-
-  return DEFAULT_DIRECTIONS[scope] ?? "中转内部";
-}
-
-function readableScope(scope) {
-  return SCOPE_LABELS[scope] ?? scope;
-}
-
 function readableKey(key) {
   return KEY_LABELS[key] ?? key;
 }
 
-function shortenTrace(value) {
-  if (typeof value !== "string" || value.length <= 32) {
+function shortenIdentifier(value) {
+  if (typeof value !== "string") {
     return value;
   }
 
-  return `${value.slice(0, 20)}...`;
+  const identifierWithoutPrefix = value.replace(
+    /^(?:session-|voice-session_|model-response_|listen_|voice_|sse_)/,
+    "",
+  );
+
+  return identifierWithoutPrefix.length <= 8
+    ? identifierWithoutPrefix
+    : identifierWithoutPrefix.slice(0, 8);
 }
 
 function formatValue(key, value) {
@@ -426,7 +399,7 @@ function formatValue(key, value) {
     key === "eventId" ||
     key === "connectionId"
   ) {
-    return shortenTrace(value);
+    return shortenIdentifier(value);
   }
 
   if (key === "error") {
@@ -469,12 +442,137 @@ function formatDetails(details) {
     .join(" | ");
 }
 
+function formatCompactDuration(durationMs) {
+  if (!Number.isFinite(durationMs)) {
+    return "";
+  }
+
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function formatCompactInfo(record) {
+  const linePrefix = `${formatLogTime(new Date(record.ts))} INFO `;
+
+  if (record.scope === "listenQwen" && record.message === "asr_partial_received") {
+    return `${linePrefix} 🎤 识别 | ${JSON.stringify(record.content ?? record.contentPreview ?? "")}`;
+  }
+
+  if (record.scope === "modelResponse" && record.message === "delta_received") {
+    return `${linePrefix} 💬 回复+ | ${JSON.stringify(record.content ?? record.contentPreview ?? "")}`;
+  }
+
+  if (record.scope === "deepseek" && record.message === "delta_received") {
+    const action = record.stream === false ? "回复" : "回复+";
+    return `${linePrefix} 💬 ${action} | ${JSON.stringify(record.content ?? "")}`;
+  }
+
+  if (record.scope === "modelResponse" && record.message === "completed") {
+    return `${linePrefix} ✅ 回复完成 | ${record.chunkCount ?? 0}片 ${record.totalChars ?? 0}字 ${formatCompactDuration(record.totalDurationMs)}`;
+  }
+
+  if (record.scope === "deepseek" && record.message === "request_success") {
+    if (record.stream === false) {
+      return `${linePrefix} 💬 回复 | ${JSON.stringify(record.content ?? record.answerPreview ?? "")}`;
+    }
+
+    return `${linePrefix} ✅ 回复完成 | ${record.chunkCount ?? 0}片 ${record.returnedLength ?? 0}字 ${formatCompactDuration(record.durationMs)}`;
+  }
+
+  if (record.scope === "voiceSession" && record.message === "started") {
+    return `${linePrefix} 🎙️ 会话开始`;
+  }
+
+  if (record.scope === "voiceSession" && record.message === "ended") {
+    return `${linePrefix} 🛑 会话结束 | ${formatCompactDuration(record.sessionDurationMs)}`;
+  }
+
+  const isCompactScope = (
+    record.scope === "voiceMonitor" ||
+    record.scope === "listenQwen" ||
+    record.scope === "deepseek" ||
+    record.scope === "voiceSession" ||
+    record.scope === "modelResponse" ||
+    record.scope === "robotEvents"
+  );
+
+  if (isCompactScope) {
+    return null;
+  }
+
+  return undefined;
+}
+
+const WARNING_DETAIL_ORDER = [
+  "robotId",
+  "sessionId",
+  "wholeSessionId",
+  "activeSessionId",
+  "utteranceSessionId",
+  "turnId",
+  "responseId",
+  "reason",
+  "ignoreReason",
+];
+
+const ERROR_DETAIL_ORDER = [
+  ...WARNING_DETAIL_ORDER,
+  "route",
+  "statusCode",
+  "durationMs",
+  "timeoutMs",
+  "error",
+  "target",
+  "address",
+  "traceId",
+];
+
+function formatDiagnosticDetails(level, details) {
+  const detailOrder = level === "error" ? ERROR_DETAIL_ORDER : WARNING_DETAIL_ORDER;
+
+  return detailOrder
+    .filter((key) => Object.hasOwn(details, key))
+    .map((key) => {
+      const value = formatValue(key, details[key]);
+      return value ? `${readableKey(key)}=${value}` : "";
+    })
+    .filter(Boolean)
+    .join(" | ");
+}
+
 function formatPretty(record) {
-  const { ts, level, scope, message, direction, ...details } = record;
-  const detailText = formatDetails(details);
-  const readableScopeName = readableScope(scope);
-  const readableDirectionName = readableDirection(scope, message, direction);
-  const line = `${formatTimestamp(new Date(ts))} ${level.toUpperCase().padEnd(5)} [${readableScopeName}][${readableDirectionName}] ${readableMessage(scope, message)}`;
+  if (record.level === "info") {
+    const compactLine = formatCompactInfo(record);
+
+    if (compactLine !== undefined) {
+      return compactLine;
+    }
+  }
+
+  const isDuplicateIgnoredResponse = (
+    record.level === "warn" &&
+    record.message === "response_sent" &&
+    (record.ignored === true || record.outcome === "忽略")
+  );
+  const isDuplicateVoiceServiceFailure = (
+    record.level === "error" &&
+    record.scope === "voiceSession" &&
+    record.message === "response_sent" &&
+    record.statusCode === 502
+  );
+
+  if (isDuplicateIgnoredResponse || isDuplicateVoiceServiceFailure) {
+    return null;
+  }
+
+  const { ts, level, scope, message, direction: _direction, ...details } = record;
+  const detailText = level === "info"
+    ? formatDetails(details)
+    : formatDiagnosticDetails(level, details);
+  const line = `${formatLogTime(new Date(ts))} ${level.toUpperCase().padEnd(5)} ${readableMessage(scope, message)}`;
 
   return detailText ? `${line} | ${detailText}` : line;
 }
@@ -581,6 +679,11 @@ function emit(level, scope, message, details = {}) {
   };
 
   const line = LOG_FORMAT === "json" ? JSON.stringify(record) : formatPretty(record);
+
+  if (line === null) {
+    return;
+  }
+
   appendLogFile(line, date);
 
   if (level === "error") {

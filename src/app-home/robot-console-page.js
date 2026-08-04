@@ -187,9 +187,23 @@ export function RobotConsolePage() {
   const [voiceSessionId, setVoiceSessionId] = useState("");
   const [voiceSessionRequestState, setVoiceSessionRequestState] = useState("idle");
   const [voiceControlMessage, setVoiceControlMessage] = useState("");
+  const messagesContainerRef = useRef(null);
   const upstreamChatsRef = useRef({});
   const processedRobotEventIdsRef = useRef(new Set());
   const endedVoiceSessionIdsRef = useRef(new Set());
+
+  useEffect(() => {
+    const messagesContainer = messagesContainerRef.current;
+
+    if (!messagesContainer) {
+      return;
+    }
+
+    messagesContainer.scrollTo({
+      top: messagesContainer.scrollHeight,
+      behavior: "auto",
+    });
+  }, [messages]);
 
   useEffect(() => {
     function hasProcessedRobotEvent(event) {
@@ -497,7 +511,11 @@ export function RobotConsolePage() {
           </div>
         </header>
 
-        <section className="messages" aria-label="对话消息">
+        <section
+          ref={messagesContainerRef}
+          className="messages"
+          aria-label="对话消息"
+        >
           {messages.map((message) => (
             <article className={`message ${message.role}`} key={message.id}>
               <div className="avatar" aria-hidden="true">{message.role === "assistant" ? "智" : "我"}</div>
@@ -791,7 +809,8 @@ export function RobotConsolePage() {
         }
 
         .chat-shell {
-          min-height: 100svh;
+          height: 100svh;
+          min-height: 0;
           width: min(100%, 1080px);
           padding: 24px 20px;
           display: flex;
@@ -801,7 +820,8 @@ export function RobotConsolePage() {
 
         .chat-card {
           width: 100%;
-          min-height: calc(100svh - 48px);
+          height: 100%;
+          min-height: 0;
           border: 1px solid #e2e8f0;
           border-radius: 24px;
           background: #ffffff;
@@ -874,10 +894,11 @@ export function RobotConsolePage() {
         }
 
         .messages {
-          min-height: 420px;
+          min-height: 0;
           padding: 32px 40px;
           gap: 24px;
           background: linear-gradient(180deg, #fbfcfe 0%, #f7f9fc 100%);
+          overscroll-behavior-y: contain;
           scrollbar-gutter: stable;
         }
 
@@ -1332,10 +1353,12 @@ export function RobotConsolePage() {
         @media (max-width: 640px) {
           .chat-shell {
             width: 100%;
+            height: 100svh;
             padding: 0;
           }
 
           .chat-card {
+            height: 100%;
             min-height: 100svh;
             border: 0;
             border-radius: 0;
