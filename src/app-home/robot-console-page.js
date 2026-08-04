@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { subscribeRobotEvents } from "./chat-api.js";
+import { sendVoiceSessionControl, subscribeRobotEvents } from "./chat-api.js";
 
 const initialMessages = [
   {
@@ -163,11 +163,21 @@ function getVoiceAssistantState(eventName, data) {
     return "listening";
   }
 
-  if (eventName === "final_input" || eventName === "deepseek_delta") {
+  if (
+    eventName === "final_input" ||
+    eventName === "deepseek_delta" ||
+    eventName === "model_response_start" ||
+    eventName === "model_response_delta" ||
+    eventName === "model_response_snapshot"
+  ) {
     return "processing";
   }
 
-  if (eventName === "tts_done" || eventName === "robot_error") {
+  if (
+    eventName === "tts_done" ||
+    eventName === "model_response_done" ||
+    eventName === "robot_error"
+  ) {
     return "ready";
   }
 
@@ -178,9 +188,12 @@ export function RobotConsolePage() {
   const [messages, setMessages] = useState(initialMessages);
   const [voiceAssistantState, setVoiceAssistantState] = useState("ready");
   const [interactionNumber, setInteractionNumber] = useState(0);
-  const [isVoiceControlAwake, setIsVoiceControlAwake] = useState(false);
+  const [voiceSessionId, setVoiceSessionId] = useState("");
+  const [voiceSessionRequestState, setVoiceSessionRequestState] = useState("idle");
+  const [voiceControlMessage, setVoiceControlMessage] = useState("");
   const upstreamChatsRef = useRef({});
   const processedRobotEventIdsRef = useRef(new Set());
+  const endedVoiceSessionIdsRef = useRef(new Set());
 
   useEffect(() => {
     function hasProcessedRobotEvent(event) {
@@ -197,7 +210,8 @@ export function RobotConsolePage() {
       processedIds.add(event.id);
 
       if (processedIds.size > 500) {
-        processedIds.clear();
+        const oldestEventId = processedIds.values().next().value;
+        processedIds.delete(oldestEventId);
       }
 
       return false;
@@ -242,16 +256,75 @@ export function RobotConsolePage() {
       return message.id;
     }
 
-    function applyUpstreamChatEvent(eventName, event, data) {
-      if (event?.replayed || hasProcessedRobotEvent(event)) {
+    function applyUpstreamChatEvent(eventName, event, data, eventMetadata) {
+      const isActiveModelSnapshot = eventName === "model_response_snapshot" && data.active;
+      const isInitialReplay = (
+        event?.replayed &&
+        eventMetadata?.connectionNumber <= 1 &&
+        !isActiveModelSnapshot
+      );
+
+      if (isInitialReplay) {
+        hasProcessedRobotEvent(event);
         return;
       }
 
-      if (!["asr_partial", "final_input", "deepseek_delta", "tts_done", "robot_error"].includes(eventName)) {
+      if (hasProcessedRobotEvent(event)) {
+        return;
+      }
+
+      if (![
+        "asr_partial",
+        "final_input",
+        "deepseek_delta",
+        "tts_done",
+        "model_response_start",
+        "model_response_delta",
+        "model_response_snapshot",
+        "model_response_done",
+        "robot_error",
+      ].includes(eventName)) {
         return;
       }
 
       if (isWebConsoleSession(data)) {
+        return;
+      }
+
+      if (
+        eventName === "model_response_start" ||
+        eventName === "model_response_delta" ||
+        eventName === "model_response_snapshot" ||
+        eventName === "model_response_done"
+      ) {
+        const responseKey = data.responseId || `model-response-${data.sessionId || event?.id}`;
+        const responseChat = getUpstreamChat(responseKey);
+        const assistantMessageId = ensureUpstreamAssistantMessage(responseChat);
+
+        if (eventName === "model_response_delta" && data.content) {
+          setMessages((current) => updateMessageContent(
+            current,
+            assistantMessageId,
+            (previousContent) => `${previousContent}${data.content}`,
+          ));
+        }
+
+        if (eventName === "model_response_snapshot") {
+          setMessages((current) => updateMessageContent(
+            current,
+            assistantMessageId,
+            () => data.content || "",
+          ));
+        }
+
+        if (eventName === "model_response_done") {
+          setMessages((current) => updateMessageContent(
+            current,
+            assistantMessageId,
+            (previousContent) => data.content || previousContent || "暂未收到回复内容",
+          ));
+        }
+
         return;
       }
 
@@ -319,24 +392,89 @@ export function RobotConsolePage() {
     }
 
     return subscribeRobotEvents({
-      onEvent: (eventName, event) => {
+      onEvent: (eventName, event, eventMetadata) => {
         const data = event?.data || event || {};
+        const isModelResponseEvent = eventName.startsWith("model_response_");
+
+        if (
+          isModelResponseEvent &&
+          data.sessionId &&
+          endedVoiceSessionIdsRef.current.has(data.sessionId)
+        ) {
+          return;
+        }
+
         const nextVoiceAssistantState = getVoiceAssistantState(eventName, data);
 
         if (nextVoiceAssistantState) {
           setVoiceAssistantState(nextVoiceAssistantState);
         }
 
-        applyUpstreamChatEvent(eventName, event, data);
+        applyUpstreamChatEvent(eventName, event, data, eventMetadata);
       },
     });
   }, []);
 
   const voiceAssistantCopy = voiceAssistantStatusCopy[voiceAssistantState];
+  const isVoiceSessionActive = Boolean(voiceSessionId);
+  const isVoiceSessionRequestPending = voiceSessionRequestState !== "idle";
+  const voiceControlHint = voiceSessionRequestState === "starting"
+    ? "正在开启"
+    : voiceSessionRequestState === "stopping"
+      ? "正在结束"
+      : isVoiceSessionActive
+        ? "结束会话"
+        : "开始会话";
 
-  function handleVoiceAssistantInteraction() {
-    setIsVoiceControlAwake(true);
+  async function handleVoiceAssistantInteraction() {
+    if (isVoiceSessionRequestPending) {
+      return;
+    }
+
+    const nextStatus = isVoiceSessionActive ? "0" : "1";
+    const nextRequestState = isVoiceSessionActive ? "stopping" : "starting";
+
+    setVoiceSessionRequestState(nextRequestState);
+    setVoiceControlMessage(isVoiceSessionActive ? "正在结束语音会话" : "正在开启语音会话");
     setInteractionNumber((currentNumber) => currentNumber + 1);
+
+    try {
+      const result = await sendVoiceSessionControl({
+        status: nextStatus,
+        sessionId: voiceSessionId,
+      });
+
+      if (nextStatus === "1") {
+        if (!result.sessionId) {
+          throw new Error("服务未返回会话标识");
+        }
+
+        setVoiceSessionId(result.sessionId);
+        setVoiceControlMessage("语音会话进行中");
+        return;
+      }
+
+      endedVoiceSessionIdsRef.current.add(voiceSessionId);
+
+      if (endedVoiceSessionIdsRef.current.size > 100) {
+        const oldestSessionId = endedVoiceSessionIdsRef.current.values().next().value;
+        endedVoiceSessionIdsRef.current.delete(oldestSessionId);
+      }
+
+      setVoiceSessionId("");
+      setVoiceAssistantState("ready");
+      setVoiceControlMessage("语音会话已结束");
+    } catch (error) {
+      const fallbackMessage = isVoiceSessionActive
+        ? "结束失败，请再次点击重试"
+        : "开启失败，请检查机器人连接";
+
+      setVoiceControlMessage(error instanceof Error && error.message
+        ? error.message
+        : fallbackMessage);
+    } finally {
+      setVoiceSessionRequestState("idle");
+    }
   }
 
   return (
@@ -400,24 +538,26 @@ export function RobotConsolePage() {
       </section>
 
       <aside
-        className={`voice-assistant-control voice-assistant-control--${voiceAssistantState} ${isVoiceControlAwake ? "voice-assistant-control--awake" : ""}`}
+        className={`voice-assistant-control voice-assistant-control--${voiceAssistantState} ${isVoiceSessionActive ? "voice-assistant-control--awake" : ""}`}
         aria-label="语音助手"
       >
-        {isVoiceControlAwake ? (
+        {voiceControlMessage ? (
           <div
             className="voice-assistant-control__feedback"
             role="status"
             aria-live="polite"
             aria-atomic="true"
           >
-            语音助手已唤醒
+            {voiceControlMessage}
           </div>
         ) : null}
         <button
           type="button"
           className="voice-assistant-control__button"
           onClick={handleVoiceAssistantInteraction}
-          aria-label={isVoiceControlAwake ? "语音助手已唤醒" : "唤醒语音助手"}
+          disabled={isVoiceSessionRequestPending}
+          aria-pressed={isVoiceSessionActive}
+          aria-label={isVoiceSessionActive ? "结束语音会话" : "开始语音会话"}
         >
           <span className="voice-assistant-control__halo" aria-hidden="true" />
           {interactionNumber > 0 ? (
@@ -434,7 +574,7 @@ export function RobotConsolePage() {
             <path className="voice-assistant-control__sound-wave" d="M51 23c3 4 3 10 0 14M56 18c5 7 5 17 0 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
           </svg>
           <span className="voice-assistant-control__hint">
-            {isVoiceControlAwake ? "已唤醒" : "点我唤醒"}
+            {voiceControlHint}
           </span>
         </button>
       </aside>
@@ -874,6 +1014,12 @@ export function RobotConsolePage() {
           outline-offset: 4px;
         }
 
+        .voice-assistant-control__button:disabled {
+          cursor: wait;
+          opacity: 0.72;
+          transform: none;
+        }
+
         .voice-assistant-control__halo {
           position: absolute;
           inset: -8px;
@@ -931,7 +1077,7 @@ export function RobotConsolePage() {
           box-shadow: 0 14px 34px rgba(82, 137, 214, 0.3);
         }
 
-        .voice-assistant-control__button:hover {
+        .voice-assistant-control__button:not(:disabled):hover {
           transform: translateY(-2px) scale(1.02);
         }
 

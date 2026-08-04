@@ -1,0 +1,40 @@
+services:
+  transit-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zhongzhauan:latest
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      LOG_FILE_ENABLED: "true"
+      LOG_FILE_TIME_UNIT: day
+      LOG_FILE_MAX_BYTES: "5242880"
+      LOG_FILE_MAX_BACKUPS: "2"
+      LOG_FILE_RETENTION_DAYS: "7"
+      ROBOT_CLIENT_BASE_URL: http://host.docker.internal:9000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    volumes:
+      - transit-logs:/app/logs
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4000/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  transit-logs:

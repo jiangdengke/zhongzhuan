@@ -1,5 +1,13 @@
 import { randomUUID } from "crypto";
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from "fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from "fs";
 import { dirname, resolve } from "path";
 
 const LOG_FORMAT = process.env.LOG_FORMAT ?? "pretty";
@@ -8,6 +16,8 @@ const LOG_FILE_DIR = process.env.LOG_FILE_DIR ?? "logs";
 const LOG_FILE_TIME_UNIT = process.env.LOG_FILE_TIME_UNIT ?? "hour";
 const LOG_FILE_MAX_BYTES = Number(process.env.LOG_FILE_MAX_BYTES ?? 5 * 1024 * 1024);
 const LOG_FILE_MAX_BACKUPS = Number(process.env.LOG_FILE_MAX_BACKUPS ?? 5);
+const LOG_FILE_RETENTION_DAYS = Number(process.env.LOG_FILE_RETENTION_DAYS ?? 7);
+let lastLogRetentionPruneDay = "";
 
 const MESSAGE_LABELS = {
   voiceMonitor: {
@@ -272,6 +282,50 @@ function rotateLogFile(filePath) {
   }
 }
 
+function removeExpiredLogFiles(directoryPath, cutoffTimestamp) {
+  if (!existsSync(directoryPath)) {
+    return;
+  }
+
+  for (const directoryEntry of readdirSync(directoryPath, { withFileTypes: true })) {
+    const entryPath = resolve(directoryPath, directoryEntry.name);
+
+    if (directoryEntry.isDirectory()) {
+      removeExpiredLogFiles(entryPath, cutoffTimestamp);
+      continue;
+    }
+
+    const isManagedLogFile = (
+      directoryEntry.isFile() &&
+      /\.log(?:\.\d+)?$/.test(directoryEntry.name)
+    );
+
+    if (isManagedLogFile && statSync(entryPath).mtimeMs < cutoffTimestamp) {
+      unlinkSync(entryPath);
+    }
+  }
+}
+
+function pruneExpiredLogs(date) {
+  if (!Number.isFinite(LOG_FILE_RETENTION_DAYS) || LOG_FILE_RETENTION_DAYS <= 0) {
+    return;
+  }
+
+  const currentDay = [
+    date.getFullYear(),
+    padNumber(date.getMonth() + 1),
+    padNumber(date.getDate()),
+  ].join("-");
+
+  if (lastLogRetentionPruneDay === currentDay) {
+    return;
+  }
+
+  const retentionMilliseconds = LOG_FILE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  removeExpiredLogFiles(resolve(LOG_FILE_DIR), date.getTime() - retentionMilliseconds);
+  lastLogRetentionPruneDay = currentDay;
+}
+
 function appendLogFile(line, date) {
   if (!LOG_FILE_ENABLED) {
     return;
@@ -282,6 +336,7 @@ function appendLogFile(line, date) {
     mkdirSync(dirname(filePath), { recursive: true });
     rotateLogFile(filePath);
     appendFileSync(filePath, `${line}\n`, "utf8");
+    pruneExpiredLogs(date);
   } catch (error) {
     console.error(`日志文件写入失败: ${error instanceof Error ? error.message : String(error)}`);
   }

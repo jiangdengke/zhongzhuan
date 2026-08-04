@@ -59,6 +59,7 @@ export function subscribeRobotEvents(handlers = {}) {
   }
 
   const source = new EventSource("/robot/events");
+  let connectionNumber = 0;
   const eventNames = [
     "ready",
     "voice",
@@ -66,11 +67,16 @@ export function subscribeRobotEvents(handlers = {}) {
     "final_input",
     "deepseek_delta",
     "tts_done",
+    "model_response_start",
+    "model_response_delta",
+    "model_response_snapshot",
+    "model_response_done",
     "robot_error",
   ];
 
   source.onopen = () => {
-    handlers.onOpen?.();
+    connectionNumber += 1;
+    handlers.onOpen?.({ connectionNumber });
   };
 
   source.onerror = () => {
@@ -79,13 +85,40 @@ export function subscribeRobotEvents(handlers = {}) {
 
   for (const eventName of eventNames) {
     source.addEventListener(eventName, (message) => {
-      handlers.onEvent?.(eventName, parseEventData(message));
+      handlers.onEvent?.(
+        eventName,
+        parseEventData(message),
+        { connectionNumber },
+      );
     });
   }
 
   return () => {
     source.close();
   };
+}
+
+export async function sendVoiceSessionControl({ status, sessionId = "" }) {
+  const payload = { status };
+
+  if (sessionId) {
+    payload.sessionId = sessionId;
+  }
+
+  const response = await fetch("/api/voice-session/control", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "语音会话控制失败");
+  }
+
+  return data;
 }
 
 export async function sendChatMessageStream(content, handlers = {}) {

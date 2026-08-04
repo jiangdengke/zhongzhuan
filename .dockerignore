@@ -1,0 +1,14 @@
+.git
+.gitignore
+.next
+.next-dev
+node_modules
+logs
+coverage
+npm-debug.log*
+.env
+.env.*
+!.env.example
+.cursor
+.trellis
+agent-transcripts

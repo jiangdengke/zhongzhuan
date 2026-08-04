@@ -1,4 +1,5 @@
 import { subscribeRobotEvents } from "@/features/robot/application/robot-events.js";
+import { readActiveModelResponseSnapshots } from "@/features/robot/application/model-response.js";
 import { createSseHeaders, encodeSseEvent } from "@/shared/http/sse.js";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,16 @@ export async function GET(request) {
       unsubscribe = subscribeRobotEvents((event) => {
         enqueue(event.type, event);
       }, { replayRecent: true });
+
+      for (const snapshot of readActiveModelResponseSnapshots()) {
+        enqueue("model_response_snapshot", {
+          id: `model-response-snapshot-${snapshot.responseId}-${snapshot.chunkCount}`,
+          type: "model_response_snapshot",
+          at: new Date().toISOString(),
+          replayed: true,
+          data: snapshot,
+        });
+      }
 
       keepAlive = setInterval(() => {
         enqueue("ping", {
