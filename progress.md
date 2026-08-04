@@ -465,3 +465,27 @@
 - `src/shared/logging/logger.js`: adds directional scope formatting, Chinese business field names, warning support, duration formatting, and model/SSE event labels.
 - `progress.md`: records the implementation, runtime evidence, file scope, and rollback point for this task.
 - Rollback: preserve later edits, then run `git restore --source=853baf3 -- app/api/voice-session/control/route.js app/robot/events/route.js app/robot/model/Response/stream/route.js app/robot/model/response_monitor/route.js app/robot/voiceMonitor/route.js docs/DOCKER_DEPLOYMENT.md docs/ROBOT_VOICE_SESSION.md src/app-home/robot-console-page.js src/features/robot/application/listen-qwen.js src/features/robot/application/model-response.js src/features/robot/application/robot-events.js src/features/robot/application/voice-monitor.js src/features/robot/application/voice-session.js src/integrations/robot-client/client.js src/shared/logging/logger.js progress.md`.
+
+## 2026-08-04 - Task: associate model callbacks without a returned whole-session ID
+### What was done
+- Made `sessionId` optional on both voice-service model callback endpoints and stopped comparing a voice-service callback ID with the transit-generated whole-session ID.
+- Associated model start, incremental, and completion callbacks with the terminal's current whole session through `robotId`; an optional voice-service `sessionId` is retained only as the model turn ID for diagnostics.
+- Preserved real incremental page delivery without fabricating character-by-character output when the voice service sends one complete response in a single stream request.
+- Updated integration and deployment documentation with the new callback contract and a clear explanation of why one HTTP fragment produces one page update.
+
+### Testing
+- `npm run build` passed with the updated optional-session callback validation and association logic.
+- A live callback sequence with no `sessionId` completed successfully and delivered two distinct `model_response_delta` events through SSE.
+- A second callback sequence carrying a voice-service-local ID completed successfully; responses contained the active whole-session ID and retained the supplied local ID as `turnId`.
+- The two live sequences produced three model delta events, two completion events, and all expected text fragments in the SSE stream.
+- A callback sent after ending the whole voice session returned HTTP 200 with `ignored: true` and logged `当前终端没有活动的整段会话`.
+- `git diff --check` and IDE diagnostics passed for the callback implementation and routes.
+
+### Notes
+- `app/robot/model/Response/stream/route.js`: distinguishes the internally resolved whole-session ID from an optional voice-service turn ID in error logs.
+- `app/robot/model/response_monitor/route.js`: labels an incoming optional `sessionId` as the voice-service turn and logs the internally resolved whole session separately.
+- `docs/DOCKER_DEPLOYMENT.md`: documents terminal-based callback association and the optional diagnostic turn ID.
+- `docs/ROBOT_VOICE_SESSION.md`: removes callback whole-session requirements, updates request examples, and explains real versus artificial streaming.
+- `src/features/robot/application/model-response.js`: resolves the active whole session by `robotId`, accepts missing or local callback IDs, and propagates the optional turn ID through model events and snapshots.
+- `progress.md`: records the revised protocol behavior, runtime evidence, file scope, and rollback point.
+- Rollback: run `git restore --source=49b4076 -- app/robot/model/Response/stream/route.js app/robot/model/response_monitor/route.js docs/DOCKER_DEPLOYMENT.md docs/ROBOT_VOICE_SESSION.md src/features/robot/application/model-response.js progress.md`; this restores strict whole-session matching and makes callback `sessionId` mandatory again.

@@ -62,7 +62,7 @@ Application logs use the default `LOG_FORMAT=pretty` format so they can be read 
 2026-08-04 06:20:36.247 ERROR [会话控制][语音服务→中转服务] ❌ 下发语音控制失败 | 会话=session-b506... | 终端=4 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT
 ```
 
-The application enriches voice-service failures with the target address, elapsed time, timeout classification, and low-level network code when the runtime provides them. Model callback logs also show the received whole-session ID, the active whole-session ID, and explicit ignore reasons when `/robot/model/Response/stream` arrives before its start callback or carries an ASR per-utterance ID. View the same readable output with:
+The application enriches voice-service failures with the target address, elapsed time, timeout classification, and low-level network code when the runtime provides them. Model callbacks are associated with the current whole session by `robotId`; an optional voice-service `sessionId` is logged as `话轮` and is not compared with the whole-session ID. Logs report explicit ignore reasons when `/robot/model/Response/stream` arrives before its start callback or while the terminal has no active whole session. View the same readable output with:
 
 ```bash
 docker logs --tail 100 -f zhongzhuan

@@ -1,7 +1,7 @@
 import { logError, logInfo, logWarn, makeTraceId } from "@/shared/logging/logger.js";
 import { readString } from "@/shared/strings.js";
 import { publishRobotEvent } from "./robot-events.js";
-import { isCurrentVoiceSession, readVoiceSession } from "./voice-session-state.js";
+import { readVoiceSession } from "./voice-session-state.js";
 
 const MODEL_RESPONSE_STARTED = "1";
 const MODEL_RESPONSE_ENDED = "0";
@@ -34,9 +34,9 @@ function createValidationError(traceId, error) {
   return createResult(400, traceId, { ok: false, error });
 }
 
-function validateSessionFields(payload, traceId) {
+function validateCallbackFields(payload, traceId) {
   const robotId = readString(payload?.robotId);
-  const sessionId = readString(payload?.sessionId);
+  const callbackSessionId = readString(payload?.sessionId);
 
   if (!robotId || robotId.length > MAX_ROBOT_ID_CHARS) {
     return {
@@ -44,13 +44,16 @@ function validateSessionFields(payload, traceId) {
     };
   }
 
-  if (!sessionId || sessionId.length > MAX_SESSION_ID_CHARS) {
+  if (callbackSessionId.length > MAX_SESSION_ID_CHARS) {
     return {
-      result: createValidationError(traceId, "valid sessionId is required"),
+      result: createValidationError(
+        traceId,
+        `sessionId must not exceed ${MAX_SESSION_ID_CHARS} characters`,
+      ),
     };
   }
 
-  return { robotId, sessionId };
+  return { robotId, callbackSessionId };
 }
 
 function createResponseId(sessionId, state) {
@@ -120,6 +123,7 @@ export function readActiveModelResponseSnapshots() {
   return Array.from(state.responsesBySessionId.values(), (response) => ({
     robotId: response.robotId,
     sessionId: response.sessionId,
+    turnId: response.turnId,
     responseId: response.responseId,
     content: response.content,
     chunkCount: response.chunkCount,
@@ -129,41 +133,41 @@ export function readActiveModelResponseSnapshots() {
 
 export function handleModelResponseMonitor(payload, options = {}) {
   const traceId = options.traceId ?? makeTraceId("model-response");
-  const fields = validateSessionFields(payload, traceId);
+  const fields = validateCallbackFields(payload, traceId);
 
   if (fields.result) {
     return fields.result;
   }
 
-  const { robotId, sessionId } = fields;
+  const { robotId, callbackSessionId } = fields;
   const status = readString(payload?.status);
 
   if (status !== MODEL_RESPONSE_STARTED && status !== MODEL_RESPONSE_ENDED) {
     return createValidationError(traceId, 'status must be "0" or "1"');
   }
 
-  if (!isCurrentVoiceSession(robotId, sessionId)) {
-    const currentVoiceSession = readVoiceSession(robotId);
+  const currentVoiceSession = readVoiceSession(robotId);
+  const wholeSessionId = currentVoiceSession?.sessionId;
 
+  if (!wholeSessionId) {
     logWarn("modelResponse", "ignored", {
       direction: "语音服务→中转服务",
       route: MODEL_RESPONSE_MONITOR_ROUTE,
       service: "语音服务",
       traceId,
       robotId,
-      wholeSessionId: sessionId,
-      activeSessionId: currentVoiceSession?.sessionId,
+      turnId: callbackSessionId,
       status,
       statusCode: 200,
       outcome: "忽略",
-      ignoreReason: "整段会话不是当前活动会话",
+      ignoreReason: "当前终端没有活动的整段会话",
     });
 
     return createResult(200, traceId, {
       ok: true,
       ignored: true,
       robotId,
-      sessionId,
+      turnId: callbackSessionId || undefined,
       status,
     });
   }
@@ -172,7 +176,7 @@ export function handleModelResponseMonitor(payload, options = {}) {
   pruneStaleModelResponses(state);
 
   if (status === MODEL_RESPONSE_STARTED) {
-    const existingResponse = state.responsesBySessionId.get(sessionId);
+    const existingResponse = state.responsesBySessionId.get(wholeSessionId);
 
     if (existingResponse) {
       const isImmediateDuplicate = (
@@ -187,7 +191,8 @@ export function handleModelResponseMonitor(payload, options = {}) {
           service: "语音服务",
           traceId,
           robotId,
-          wholeSessionId: sessionId,
+          wholeSessionId,
+          turnId: callbackSessionId,
           responseId: existingResponse.responseId,
           status,
           statusCode: 200,
@@ -199,18 +204,20 @@ export function handleModelResponseMonitor(payload, options = {}) {
           ok: true,
           ignored: true,
           robotId,
-          sessionId,
+          sessionId: wholeSessionId,
+          turnId: callbackSessionId || undefined,
           responseId: existingResponse.responseId,
           status,
         });
       }
 
-      state.responsesBySessionId.delete(sessionId);
+      state.responsesBySessionId.delete(wholeSessionId);
       logWarn("modelResponse", "interrupted", {
         direction: "中转内部",
         traceId,
         robotId,
-        wholeSessionId: sessionId,
+        wholeSessionId,
+        turnId: existingResponse.turnId,
         responseId: existingResponse.responseId,
         chunkCount: existingResponse.chunkCount,
         totalChars: existingResponse.content.length,
@@ -220,7 +227,8 @@ export function handleModelResponseMonitor(payload, options = {}) {
       publishModelResponseEvent("model_response_done", {
         traceId,
         robotId,
-        sessionId,
+        sessionId: wholeSessionId,
+        turnId: existingResponse.turnId,
         responseId: existingResponse.responseId,
         content: existingResponse.content,
         chunkCount: existingResponse.chunkCount,
@@ -230,10 +238,11 @@ export function handleModelResponseMonitor(payload, options = {}) {
     }
 
     const startedAt = Date.now();
-    const responseId = createResponseId(sessionId, state);
-    state.responsesBySessionId.set(sessionId, {
+    const responseId = createResponseId(wholeSessionId, state);
+    state.responsesBySessionId.set(wholeSessionId, {
       robotId,
-      sessionId,
+      sessionId: wholeSessionId,
+      turnId: callbackSessionId,
       responseId,
       content: "",
       chunkCount: 0,
@@ -244,7 +253,8 @@ export function handleModelResponseMonitor(payload, options = {}) {
     publishModelResponseEvent("model_response_start", {
       traceId,
       robotId,
-      sessionId,
+      sessionId: wholeSessionId,
+      turnId: callbackSessionId,
       responseId,
       status,
     });
@@ -255,7 +265,8 @@ export function handleModelResponseMonitor(payload, options = {}) {
       service: "语音服务",
       traceId,
       robotId,
-      wholeSessionId: sessionId,
+      wholeSessionId,
+      turnId: callbackSessionId,
       responseId,
       status,
       responseSource: "语音服务侧模型",
@@ -266,13 +277,14 @@ export function handleModelResponseMonitor(payload, options = {}) {
     return createResult(200, traceId, {
       ok: true,
       robotId,
-      sessionId,
+      sessionId: wholeSessionId,
+      turnId: callbackSessionId || undefined,
       responseId,
       status,
     });
   }
 
-  const activeResponse = state.responsesBySessionId.get(sessionId);
+  const activeResponse = state.responsesBySessionId.get(wholeSessionId);
 
   if (!activeResponse) {
     logWarn("modelResponse", "ignored", {
@@ -281,7 +293,8 @@ export function handleModelResponseMonitor(payload, options = {}) {
       service: "语音服务",
       traceId,
       robotId,
-      wholeSessionId: sessionId,
+      wholeSessionId,
+      turnId: callbackSessionId,
       status,
       statusCode: 200,
       outcome: "忽略",
@@ -292,16 +305,18 @@ export function handleModelResponseMonitor(payload, options = {}) {
       ok: true,
       ignored: true,
       robotId,
-      sessionId,
+      sessionId: wholeSessionId,
+      turnId: callbackSessionId || undefined,
       status,
     });
   }
 
-  state.responsesBySessionId.delete(sessionId);
+  state.responsesBySessionId.delete(wholeSessionId);
   publishModelResponseEvent("model_response_done", {
     traceId,
     robotId,
-    sessionId,
+    sessionId: wholeSessionId,
+    turnId: callbackSessionId || activeResponse.turnId,
     responseId: activeResponse.responseId,
     content: activeResponse.content,
     chunkCount: activeResponse.chunkCount,
@@ -314,7 +329,8 @@ export function handleModelResponseMonitor(payload, options = {}) {
     service: "语音服务",
     traceId,
     robotId,
-    wholeSessionId: sessionId,
+    wholeSessionId,
+    turnId: callbackSessionId || activeResponse.turnId,
     responseId: activeResponse.responseId,
     status,
     responseSource: "语音服务侧模型",
@@ -328,7 +344,8 @@ export function handleModelResponseMonitor(payload, options = {}) {
   return createResult(200, traceId, {
     ok: true,
     robotId,
-    sessionId,
+    sessionId: wholeSessionId,
+    turnId: callbackSessionId || activeResponse.turnId || undefined,
     responseId: activeResponse.responseId,
     status,
   });
@@ -336,13 +353,13 @@ export function handleModelResponseMonitor(payload, options = {}) {
 
 export function handleModelResponseStream(payload, options = {}) {
   const traceId = options.traceId ?? makeTraceId("model-response");
-  const fields = validateSessionFields(payload, traceId);
+  const fields = validateCallbackFields(payload, traceId);
 
   if (fields.result) {
     return fields.result;
   }
 
-  const { robotId, sessionId } = fields;
+  const { robotId, callbackSessionId } = fields;
   const event = readString(payload?.event);
   const language = readString(payload?.language);
   const content = payload?.content;
@@ -367,22 +384,22 @@ export function handleModelResponseStream(payload, options = {}) {
   }
 
   const currentVoiceSession = readVoiceSession(robotId);
-  const isActiveVoiceSession = currentVoiceSession?.sessionId === sessionId;
+  const wholeSessionId = currentVoiceSession?.sessionId;
 
-  if (!isActiveVoiceSession || !content) {
+  if (!wholeSessionId || !content) {
     logWarn("modelResponse", "ignored", {
       direction: "语音服务→中转服务",
       route: MODEL_RESPONSE_STREAM_ROUTE,
       service: "语音服务",
       traceId,
       robotId,
-      wholeSessionId: sessionId,
-      activeSessionId: currentVoiceSession?.sessionId,
+      wholeSessionId,
+      turnId: callbackSessionId,
       contentLength: typeof content === "string" ? content.length : 0,
       statusCode: 200,
       outcome: "忽略",
-      ignoreReason: !isActiveVoiceSession
-        ? "整段会话不是当前活动会话"
+      ignoreReason: !wholeSessionId
+        ? "当前终端没有活动的整段会话"
         : "增量内容为空",
     });
 
@@ -390,13 +407,14 @@ export function handleModelResponseStream(payload, options = {}) {
       ok: true,
       ignored: true,
       robotId,
-      sessionId,
+      sessionId: wholeSessionId,
+      turnId: callbackSessionId || undefined,
     });
   }
 
   const state = getModelResponseState();
   pruneStaleModelResponses(state);
-  const activeResponse = state.responsesBySessionId.get(sessionId);
+  const activeResponse = state.responsesBySessionId.get(wholeSessionId);
 
   if (!activeResponse) {
     logWarn("modelResponse", "ignored", {
@@ -405,7 +423,8 @@ export function handleModelResponseStream(payload, options = {}) {
       service: "语音服务",
       traceId,
       robotId,
-      wholeSessionId: sessionId,
+      wholeSessionId,
+      turnId: callbackSessionId,
       contentLength: content.length,
       statusCode: 200,
       outcome: "忽略",
@@ -416,8 +435,13 @@ export function handleModelResponseStream(payload, options = {}) {
       ok: true,
       ignored: true,
       robotId,
-      sessionId,
+      sessionId: wholeSessionId,
+      turnId: callbackSessionId || undefined,
     });
+  }
+
+  if (!activeResponse.turnId && callbackSessionId) {
+    activeResponse.turnId = callbackSessionId;
   }
 
   if (activeResponse.content.length + content.length > MAX_MODEL_RESPONSE_TOTAL_CHARS) {
@@ -427,7 +451,8 @@ export function handleModelResponseStream(payload, options = {}) {
       service: "语音服务",
       traceId,
       robotId,
-      wholeSessionId: sessionId,
+      wholeSessionId,
+      turnId: callbackSessionId || activeResponse.turnId,
       responseId: activeResponse.responseId,
       contentLength: content.length,
       outcome: "拒绝",
@@ -452,7 +477,8 @@ export function handleModelResponseStream(payload, options = {}) {
   publishModelResponseEvent("model_response_delta", {
     traceId,
     robotId,
-    sessionId,
+    sessionId: wholeSessionId,
+    turnId: callbackSessionId || activeResponse.turnId,
     responseId: activeResponse.responseId,
     event: RESPONSE_PARTIAL_EVENT,
     content,
@@ -474,7 +500,8 @@ export function handleModelResponseStream(payload, options = {}) {
         service: "语音服务",
         traceId,
         robotId,
-        wholeSessionId: sessionId,
+        wholeSessionId,
+        turnId: callbackSessionId || activeResponse.turnId,
         responseId: activeResponse.responseId,
         contentLength: content.length,
         receivedChunkCount: activeResponse.chunkCount,
@@ -490,7 +517,8 @@ export function handleModelResponseStream(payload, options = {}) {
   return createResult(200, traceId, {
     ok: true,
     robotId,
-    sessionId,
+    sessionId: wholeSessionId,
+    turnId: callbackSessionId || activeResponse.turnId || undefined,
     responseId: activeResponse.responseId,
   });
 }

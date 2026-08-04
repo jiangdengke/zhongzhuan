@@ -52,7 +52,7 @@ export async function POST(request) {
     service: "语音服务",
     traceId,
     robotId: payload.data?.robotId,
-    wholeSessionId: payload.data?.sessionId,
+    turnId: payload.data?.sessionId,
     status: payload.data?.status,
   });
 
@@ -64,7 +64,8 @@ export async function POST(request) {
     service: "语音服务",
     traceId,
     robotId: responseBody.robotId ?? payload.data?.robotId,
-    wholeSessionId: responseBody.sessionId ?? payload.data?.sessionId,
+    wholeSessionId: responseBody.sessionId,
+    turnId: responseBody.turnId ?? payload.data?.sessionId,
     responseId: responseBody.responseId,
     status: responseBody.status ?? payload.data?.status,
     statusCode: result.status,
