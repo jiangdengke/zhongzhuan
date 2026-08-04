@@ -1,5 +1,8 @@
 import { randomUUID } from "crypto";
-import { sendVoiceSessionControl } from "@/integrations/robot-client/client.js";
+import {
+  getRobotVoiceSessionControlTarget,
+  sendVoiceSessionControl,
+} from "@/integrations/robot-client/client.js";
 import { robotClientConfig } from "@/integrations/robot-client/config.js";
 import { logError, logInfo, makeTraceId } from "@/shared/logging/logger.js";
 import { readString } from "@/shared/strings.js";
@@ -48,8 +51,19 @@ async function startVoiceSession({ robotId, traceId }) {
     startedAt: currentSession?.startedAt ?? Date.now(),
   });
 
+  logInfo("voiceSession", "control_sending", {
+    traceId,
+    robotId,
+    sessionId,
+    status: VOICE_SESSION_STARTED,
+    target: getRobotVoiceSessionControlTarget(),
+    timeoutMs: robotClientConfig.timeoutMs,
+  });
+
+  let controlResult;
+
   try {
-    await sendVoiceSessionControl({
+    controlResult = await sendVoiceSessionControl({
       robotId,
       sessionId,
       status: VOICE_SESSION_STARTED,
@@ -60,6 +74,10 @@ async function startVoiceSession({ robotId, traceId }) {
       robotId,
       sessionId,
       status: VOICE_SESSION_STARTED,
+      target: error.targetUrl ?? getRobotVoiceSessionControlTarget(),
+      durationMs: error.durationMs,
+      timeoutMs: error.timeoutMs ?? robotClientConfig.timeoutMs,
+      statusCode: error.statusCode,
       error,
     });
 
@@ -81,6 +99,8 @@ async function startVoiceSession({ robotId, traceId }) {
     robotId,
     sessionId,
     status: VOICE_SESSION_STARTED,
+    target: controlResult.targetUrl,
+    durationMs: controlResult.durationMs,
   });
 
   return createResult(200, traceId, {
@@ -118,8 +138,19 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
     });
   }
 
+  logInfo("voiceSession", "control_sending", {
+    traceId,
+    robotId,
+    sessionId: requestedSessionId,
+    status: VOICE_SESSION_ENDED,
+    target: getRobotVoiceSessionControlTarget(),
+    timeoutMs: robotClientConfig.timeoutMs,
+  });
+
+  let controlResult;
+
   try {
-    await sendVoiceSessionControl({
+    controlResult = await sendVoiceSessionControl({
       robotId,
       sessionId: requestedSessionId,
       status: VOICE_SESSION_ENDED,
@@ -130,6 +161,10 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
       robotId,
       sessionId: requestedSessionId,
       status: VOICE_SESSION_ENDED,
+      target: error.targetUrl ?? getRobotVoiceSessionControlTarget(),
+      durationMs: error.durationMs,
+      timeoutMs: error.timeoutMs ?? robotClientConfig.timeoutMs,
+      statusCode: error.statusCode,
       error,
     });
 
@@ -147,6 +182,8 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
     robotId,
     sessionId: requestedSessionId,
     status: VOICE_SESSION_ENDED,
+    target: controlResult.targetUrl,
+    durationMs: controlResult.durationMs,
   });
 
   return createResult(200, traceId, {

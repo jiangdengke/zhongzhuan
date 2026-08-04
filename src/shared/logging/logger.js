@@ -19,50 +19,78 @@ const LOG_FILE_MAX_BACKUPS = Number(process.env.LOG_FILE_MAX_BACKUPS ?? 5);
 const LOG_FILE_RETENTION_DAYS = Number(process.env.LOG_FILE_RETENTION_DAYS ?? 7);
 let lastLogRetentionPruneDay = "";
 
+const SCOPE_LABELS = {
+  voiceMonitor: "语音状态",
+  listenQwen: "语音转发",
+  deepseek: "DeepSeek",
+  voiceSession: "语音会话",
+  modelResponse: "模型回调",
+};
+
 const MESSAGE_LABELS = {
   voiceMonitor: {
-    invalid_json: "JSON 解析失败",
-    invalid_status: "状态值非法",
-    request_completed: "语音状态",
+    invalid_json: "❌ JSON 解析失败",
+    invalid_status: "❌ 状态无效",
+    request_completed: "✅ 语音状态已更新",
   },
   listenQwen: {
-    invalid_json: "JSON 解析失败",
-    request_received: "收到请求",
-    branch_speech_context: "对话转发 DeepSeek",
-    branch_cmd: "命令固定回复",
-    response_ready: "返回响应",
-    unknown_event: "未知事件",
+    invalid_json: "❌ JSON 解析失败",
+    request_received: "📥 收到语音请求",
+    skip_speech_after_cmd: "⚠️ 跳过重复语音请求",
+    redirect_speech_to_cmd: "🔀 转为固定指令",
+    response_ready: "✅ 返回响应",
+    unknown_event: "⚠️ 未知事件",
   },
   deepseek: {
-    request_start: "请求 DeepSeek",
-    api_key_missing: "DeepSeek 缺少 API Key",
-    response_received: "DeepSeek 已响应",
-    request_failed_status: "DeepSeek 状态异常",
-    request_success: "DeepSeek 完成",
-    request_exception: "DeepSeek 异常",
+    request_start: "⏳ 请求 DeepSeek",
+    api_key_missing: "⚠️ 缺少 DeepSeek 密钥",
+    response_received: "📥 收到 DeepSeek 响应",
+    request_failed_status: "❌ DeepSeek 返回异常",
+    request_success: "✅ DeepSeek 请求完成",
+    request_exception: "❌ DeepSeek 请求失败",
+  },
+  voiceSession: {
+    control_sending: "📤 正在连接机器人",
+    control_failed: "❌ 机器人控制失败",
+    started: "✅ 语音会话已开始",
+    ended: "🛑 语音会话已结束",
+  },
+  modelResponse: {
+    started: "📥 收到模型响应开始",
+    completed: "✅ 模型响应已完成",
+    delta_received: "📥 收到模型增量",
   },
 };
 
 const KEY_LABELS = {
-  traceId: "trace",
-  requestId: "req",
-  sessionId: "session",
-  robotId: "robot",
-  functionName: "function",
-  contentPreview: "user",
-  functionParamPreview: "param",
-  replyPreview: "reply",
-  answerPreview: "answer",
-  answerLength: "chars",
-  returnedLength: "outChars",
-  chunkCount: "chunks",
-  hasFunctionParam: "hasParam",
-  hasApiKey: "key",
-  statusCode: "http",
-  durationMs: "cost",
-  baseUrl: "upstream",
-  stream: "mode",
-  wasTruncated: "truncated",
+  traceId: "追踪",
+  requestId: "请求",
+  sessionId: "会话",
+  robotId: "机器人",
+  status: "状态",
+  phase: "阶段",
+  event: "事件",
+  functionName: "函数",
+  model: "模型",
+  contentPreview: "用户",
+  functionParamPreview: "参数",
+  replyPreview: "回复",
+  answerPreview: "回答",
+  answerLength: "字数",
+  returnedLength: "返回字数",
+  chunkCount: "片段数",
+  hasFunctionParam: "有参数",
+  hasApiKey: "有密钥",
+  statusCode: "HTTP",
+  statusText: "状态文本",
+  ok: "成功",
+  durationMs: "耗时",
+  timeoutMs: "超时",
+  baseUrl: "地址",
+  target: "地址",
+  stream: "模式",
+  wasTruncated: "已截断",
+  error: "原因",
 };
 
 const DETAIL_ORDER = [
@@ -90,7 +118,9 @@ const DETAIL_ORDER = [
   "returnedLength",
   "chunkCount",
   "wasTruncated",
+  "target",
   "durationMs",
+  "timeoutMs",
   "error",
 ];
 
@@ -117,11 +147,27 @@ export function formatError(error) {
   }
 
   if (error instanceof Error) {
-    return {
+    const formattedError = {
       name: error.name,
       message: error.message,
       stack: error.stack,
     };
+
+    for (const propertyName of ["code", "address", "port", "targetUrl", "durationMs", "timeoutMs"]) {
+      if (error[propertyName] !== undefined) {
+        formattedError[propertyName] = error[propertyName];
+      }
+    }
+
+    if (error.cause && typeof error.cause === "object") {
+      for (const propertyName of ["code", "address", "port"]) {
+        if (formattedError[propertyName] === undefined && error.cause[propertyName] !== undefined) {
+          formattedError[propertyName] = error.cause[propertyName];
+        }
+      }
+    }
+
+    return formattedError;
   }
 
   if (typeof error === "object") {
@@ -135,6 +181,62 @@ export function formatError(error) {
     name: "Error",
     message: String(error),
   };
+}
+
+function shortenIdentifier(value) {
+  if (typeof value !== "string" || value.length <= 20) {
+    return value;
+  }
+
+  return `${value.slice(0, 12)}...`;
+}
+
+function readErrorProperty(error, propertyName) {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  if (error[propertyName] !== undefined) {
+    return error[propertyName];
+  }
+
+  if (error.cause && typeof error.cause === "object") {
+    return error.cause[propertyName];
+  }
+
+  return undefined;
+}
+
+function getNetworkErrorReason(errorCode) {
+  return {
+    ECONNREFUSED: "连接被拒绝",
+    ECONNRESET: "连接被对方关闭",
+    ETIMEDOUT: "连接超时",
+    UND_ERR_CONNECT_TIMEOUT: "连接超时",
+    ENOTFOUND: "地址无法解析",
+    EAI_AGAIN: "地址解析暂时失败",
+    ECONNABORTED: "连接被中止",
+    ABORT_ERR: "请求超时",
+  }[errorCode];
+}
+
+function formatReadableError(error) {
+  const errorMessage = readErrorProperty(error, "message") ?? String(error);
+  const errorCode = readErrorProperty(error, "code");
+  const errorAddress = readErrorProperty(error, "address");
+  const errorPort = readErrorProperty(error, "port");
+  const networkReason = getNetworkErrorReason(errorCode);
+  const detailParts = [networkReason ?? errorMessage];
+
+  if (errorCode) {
+    detailParts.push(`代码=${errorCode}`);
+  }
+
+  if (errorAddress || errorPort) {
+    detailParts.push(`地址=${errorAddress ?? "未知"}:${errorPort ?? "未知"}`);
+  }
+
+  return detailParts.join(" ");
 }
 
 function padNumber(value, width = 2) {
@@ -162,6 +264,10 @@ function readableMessage(scope, message) {
   return MESSAGE_LABELS[scope]?.[message] ?? message;
 }
 
+function readableScope(scope) {
+  return SCOPE_LABELS[scope] ?? scope;
+}
+
 function readableKey(key) {
   return KEY_LABELS[key] ?? key;
 }
@@ -183,20 +289,24 @@ function formatValue(key, value) {
     return `${value}ms`;
   }
 
+  if (key === "timeoutMs") {
+    return `${value}ms`;
+  }
+
   if (key === "stream") {
-    return value ? "stream" : "json";
+    return value ? "流式" : "普通";
   }
 
   if (key === "hasApiKey") {
-    return value ? "yes" : "no";
+    return value ? "是" : "否";
   }
 
   if (key === "hasFunctionParam") {
-    return value ? "yes" : "no";
+    return value ? "是" : "否";
   }
 
   if (typeof value === "boolean") {
-    return value ? "true" : "false";
+    return value ? "是" : "否";
   }
 
   if (key === "traceId" || key === "requestId") {
@@ -204,7 +314,11 @@ function formatValue(key, value) {
   }
 
   if (key === "error") {
-    return value.message ?? String(value);
+    return formatReadableError(value);
+  }
+
+  if (key === "sessionId") {
+    return shortenIdentifier(value);
   }
 
   if (typeof value === "object") {
@@ -240,13 +354,13 @@ function formatDetails(details) {
       return `${readableKey(key)}=${value}`;
     })
     .filter(Boolean)
-    .join(" ");
+    .join(" | ");
 }
 
 function formatPretty(record) {
   const { ts, level, scope, message, ...details } = record;
   const detailText = formatDetails(details);
-  const line = `${formatTimestamp(new Date(ts))} ${level.toUpperCase().padEnd(5)} [${scope}] ${readableMessage(scope, message)}`;
+  const line = `${formatTimestamp(new Date(ts))} ${level.toUpperCase().padEnd(5)} [${readableScope(scope)}] ${readableMessage(scope, message)}`;
 
   return detailText ? `${line} | ${detailText}` : line;
 }

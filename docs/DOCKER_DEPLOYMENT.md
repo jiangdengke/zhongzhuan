@@ -52,6 +52,20 @@ The container keeps two bounded log destinations:
 
 The named volume survives application container recreation, while the retention settings prevent historical files from accumulating indefinitely.
 
+Application logs use the default `LOG_FORMAT=pretty` format so they can be read directly from Docker without a JSON viewer. Each line contains a Chinese module name, one status emoji, and pipe-separated fields:
+
+```text
+2026-08-04 06:20:31.245 INFO  [语音会话] 📤 正在连接机器人 | 会话=session-b506... | 机器人=4 | 状态=1 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 超时=5000ms
+2026-08-04 06:20:31.248 INFO  [语音会话] ✅ 语音会话已开始 | 会话=session-b506... | 机器人=4 | 状态=1 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 耗时=3ms
+2026-08-04 06:20:36.247 ERROR [语音会话] ❌ 机器人控制失败 | 会话=session-b506... | 机器人=4 | 状态=1 | 地址=http://host.docker.internal:9000/robot/voiceSession/control | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT
+```
+
+The application enriches robot-client failures with the target address, elapsed time, timeout classification, and low-level network code when the runtime provides them. View the same readable output with:
+
+```bash
+docker logs --tail 100 -f zhongzhuan
+```
+
 Verify the published endpoint:
 
 ```bash
@@ -96,6 +110,8 @@ docker compose exec transit-server \
 ```
 
 This command sends a real stop control request. Use it only when doing an explicit connectivity test with the robot client owner.
+
+The transit service sends robot control requests with `Connection: close` and consumes the response body before completing the request. This gives the separately managed Python control service an explicit, orderly connection lifecycle and avoids resetting a reused connection after a successful `200` response.
 
 If the request cannot connect on Linux, verify the robot process listener on the host:
 

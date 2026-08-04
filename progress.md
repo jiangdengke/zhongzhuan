@@ -393,3 +393,40 @@
 - `docs/DOCKER_DEPLOYMENT.md`: documents the expected Compose container and image names.
 - `progress.md`: records the naming change, verification evidence, and rollback point.
 - Rollback: remove `container_name`, restore the previous image name, and remove the container-name sentence from the deployment guide.
+
+## 2026-08-04 - Task: make application logs readable with status emojis
+### What was done
+- Changed pretty application logs to use Chinese module names, Chinese field labels, pipe-separated fields, and one status emoji per line.
+- Added readable mappings for voice-session, voice-monitor, upstream voice, DeepSeek, and model-callback events while preserving the internal event keys.
+- Shortened session identifiers for logs only; IDs sent to the robot client remain unchanged.
+- Added robot-client request timing, target URL, HTTP status, timeout classification, and low-level network code/address details to failure logs.
+
+### Testing
+- Previewed successful, outgoing, and connection-refused log lines with `LOG_FILE_ENABLED=false`; output matched the approved one-line Chinese format.
+- `npm run build` passed with Next.js `15.5.21`.
+- `git diff --check` passed.
+
+### Notes
+- `src/shared/logging/logger.js`: adds readable scope/message/field mappings, emoji status labels, Chinese boolean/mode values, shortened IDs, and network-error formatting.
+- `src/integrations/robot-client/client.js`: measures control-request duration, exposes the control target for logging, and enriches fetch failures with underlying network properties.
+- `src/features/robot/application/voice-session.js`: logs robot control start, success, and failure details for both whole-session start and stop operations.
+- `docs/DOCKER_DEPLOYMENT.md`: documents the readable format and `docker logs --tail 100 -f zhongzhuan` command.
+- Rollback: restore the three source files and remove the readable-log section from the Docker deployment guide and this progress entry.
+
+## 2026-08-04 - Task: close robot control responses without resetting connections
+### What was done
+- Changed robot control response handling from actively cancelling the response body to consuming it normally before completing the request.
+- Preserved existing HTTP status validation and enriched network-error diagnostics.
+- Documented the connection-close compatibility behavior for the separately managed Python robot service.
+
+### Testing
+- `npm run build` passed after the response handling change.
+- `git diff --check` passed.
+- A local refused-connection check continued to expose `ECONNREFUSED`, target address, port, elapsed time, and timeout configuration.
+- The robot client now reads successful response bodies with `response.text()` instead of calling `response.body.cancel()`.
+
+### Notes
+- `src/integrations/robot-client/client.js`: consumes the robot control response body before status handling completes.
+- `docs/DOCKER_DEPLOYMENT.md`: documents why normal response consumption is required for the Python control service connection lifecycle.
+- `progress.md`: records the connection-reset fix and verification evidence.
+- Rollback: restore `response.body?.cancel()` in the robot control client and remove the related deployment note; this would reintroduce the previous connection-reset risk.
