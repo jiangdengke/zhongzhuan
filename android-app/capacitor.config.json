@@ -1,0 +1,9 @@
+{
+  "appId": "com.zhongzhauan.voiceassistant",
+  "appName": "智能服务",
+  "webDir": "www",
+  "server": {
+    "url": "http://192.168.11.205:4000",
+    "cleartext": true
+  }
+}

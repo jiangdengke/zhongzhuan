@@ -514,6 +514,32 @@
 - `docs/DOCKER_DEPLOYMENT.md` and `docs/ROBOT_VOICE_SESSION.md`: document compact logs, full JSON mode, and real streaming semantics.
 - Rollback: restore the changed source and documentation files listed above together with this progress entry; doing so restores verbose pretty logs and sampled model-fragment logging.
 
+## 2026-08-05 - Task: package the customer page as an Android APK shell
+### What was done
+- Added an isolated Capacitor 8 Android project under `android-app/` with application ID `com.zhongzhauan.voiceassistant` and application name `智能服务`.
+- Configured the Android WebView shell to load `http://192.168.11.205:4000` and explicitly permitted cleartext traffic for this trusted internal-network deployment.
+- Locked the main activity to landscape orientation and implemented immersive full-screen behavior that is restored whenever the activity regains focus.
+- Added repeatable dependency, synchronization, build, Android Studio, and device installation commands in `docs/ANDROID_APK.md`.
+- Installed Homebrew Java 21 without changing the system's default Java and generated a signed debug APK.
+
+### Testing
+- `npm run build` passed for the existing Next.js transit service.
+- `npm --prefix android-app run sync:android` completed successfully.
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home npm --prefix android-app run build:debug` completed successfully with 93 Gradle tasks.
+- Android package inspection confirmed application ID `com.zhongzhauan.voiceassistant`, label `智能服务`, minimum SDK 24, target/compile SDK 36, Internet permission, and a required landscape screen feature.
+- Android signature verification passed using the v2 APK signature scheme and the standard Android debug certificate.
+- Runtime dependency audit reported zero vulnerabilities, `git diff --check` passed, and IDE diagnostics reported no changed-file issues.
+
+### Notes
+- `android-app/capacitor.config.json`: owns the application identity and fixed remote transit-page URL.
+- `android-app/android/app/src/main/AndroidManifest.xml`: permits the selected HTTP deployment and locks the activity to landscape.
+- `android-app/android/app/src/main/java/com/zhongzhauan/voiceassistant/MainActivity.java`: hides status and navigation bars using AndroidX window insets APIs.
+- `docs/ANDROID_APK.md`: documents internal-distribution boundaries, prerequisites, build commands, installation, and when an APK rebuild is required.
+- Debug APK: `android-app/android/app/build/outputs/apk/debug/app-debug.apk` (generated artifact, intentionally ignored by Git).
+- APK SHA-256: `7524a67ea942ef954e00fc83aa95afff6e21dda277899b7ce76e8ce3b66d8400`.
+- No Android device was connected during verification, so physical installation and on-device network reachability remain manual checks.
+- Rollback: remove `android-app/`, `docs/ANDROID_APK.md`, and this progress entry; uninstalling Homebrew `openjdk@21` is optional because it is an external build-tool installation rather than a repository change.
+
 ## 2026-08-04 - Task: keep live conversation and voice status visible
 ### What was done
 - Constrained the customer-facing chat card to the current viewport so conversation growth no longer extends the whole browser page.
