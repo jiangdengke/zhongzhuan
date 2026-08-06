@@ -52,6 +52,9 @@
 │   ├── ROBOT_VOICE_SESSION.md                # 语音会话与回调协议
 │   └── ANDROID_APK.md                        # APK 构建和安装说明
 │
+├── public/
+│   └── yingwang-backend.jpg                  # 页面使用的横屏背景图片
+│
 ├── .env.example                              # 环境变量示例
 ├── package.json                              # 中转服务依赖和运行命令
 ├── next.config.js                            # Next.js 构建目录配置
@@ -129,6 +132,7 @@ POST /robot/model/response_monitor  status="1"
 | 修改中转到语音服务的请求 | `src/integrations/robot-client/` |
 | 修改 DeepSeek 参数或请求行为 | `.env`、`src/integrations/deepseek/` |
 | 修改日志显示格式 | `src/shared/logging/logger.js` |
+| 修改页面背景图片 | `public/yingwang-backend.jpg` |
 | 修改 Android 打开的页面地址 | `android-app/capacitor.config.json`，然后执行 Android 同步 |
 | 修改 Android 横屏或权限 | `android-app/android/app/src/main/AndroidManifest.xml` |
 | 修改 Android 全屏行为 | `android-app/android/app/src/main/java/com/zhongzhauan/voiceassistant/MainActivity.java` |

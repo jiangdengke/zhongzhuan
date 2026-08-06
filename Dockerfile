@@ -30,6 +30,7 @@ RUN npm ci --omit=dev \
   && npm cache clean --force
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/next.config.js ./next.config.js
 
 RUN mkdir -p /app/logs \

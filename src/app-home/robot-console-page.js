@@ -497,14 +497,30 @@ export function RobotConsolePage() {
     <main className="chat-shell">
       <section className="chat-card">
         <header className="chat-header">
-          <div className="brand-lockup">
-            <div className="brand-mark" aria-hidden="true">智</div>
-            <div>
-              <p className="eyebrow">智能服务</p>
-              <h1>您好，有什么可以帮您？</h1>
-              <p className="brand-description">信息咨询、服务指引，随时为您提供帮助</p>
-            </div>
+          <div className="brand-mark" aria-hidden="true">智</div>
+          <p className="eyebrow">智能服务</p>
+          <div className="brand-heading-row">
+            <h1>您好，有什么可以帮您？</h1>
+            <section
+              className={`voice-assistant voice-assistant--${voiceAssistantState} ${isVoiceSessionActive ? "voice-assistant--awake" : ""}`}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              <div className="voice-assistant__visual" aria-hidden="true">
+                <div className="voice-assistant__waveform">
+                  {voiceWaveformBarIndexes.map((barIndex) => (
+                    <span key={barIndex} />
+                  ))}
+                </div>
+              </div>
+              <div className="voice-assistant__copy">
+                <strong>{voiceAssistantCopy.title}</strong>
+                <p>{voiceAssistantCopy.description}</p>
+              </div>
+            </section>
           </div>
+          <p className="brand-description">信息咨询、服务指引，随时为您提供帮助</p>
           <div className="status-pill">
             <span />
             服务在线
@@ -537,67 +553,50 @@ export function RobotConsolePage() {
           ))}
         </section>
 
-        <section
-          className={`voice-assistant voice-assistant--${voiceAssistantState}`}
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          <div className="voice-assistant__visual" aria-hidden="true">
-            <div className="voice-assistant__waveform">
-              {voiceWaveformBarIndexes.map((barIndex) => (
-                <span key={barIndex} />
-              ))}
-            </div>
-          </div>
-          <div className="voice-assistant__copy">
-            <strong>{voiceAssistantCopy.title}</strong>
-            <p>{voiceAssistantCopy.description}</p>
-          </div>
-        </section>
-      </section>
-
-      <aside
-        className={`voice-assistant-control voice-assistant-control--${voiceAssistantState} ${isVoiceSessionActive ? "voice-assistant-control--awake" : ""}`}
-        aria-label="语音助手"
-      >
-        {voiceControlMessage ? (
-          <div
-            className="voice-assistant-control__feedback"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
+        <div className="voice-assistant-area">
+          <aside
+            className={`voice-assistant-control voice-assistant-control--${voiceAssistantState} ${isVoiceSessionActive ? "voice-assistant-control--awake" : ""}`}
+            aria-label="语音助手"
           >
-            {voiceControlMessage}
-          </div>
-        ) : null}
-        <button
-          type="button"
-          className="voice-assistant-control__button"
-          onClick={handleVoiceAssistantInteraction}
-          disabled={isVoiceSessionRequestPending}
-          aria-pressed={isVoiceSessionActive}
-          aria-label={isVoiceSessionActive ? "结束语音会话" : "开始语音会话"}
-        >
-          <span className="voice-assistant-control__halo" aria-hidden="true" />
-          {interactionNumber > 0 ? (
-            <span
-              className="voice-assistant-control__interaction-pulse"
-              key={interactionNumber}
-              aria-hidden="true"
-            />
-          ) : null}
-          <svg className="voice-assistant-control__icon" viewBox="0 0 64 64" aria-hidden="true">
-            <rect x="24" y="9" width="16" height="31" rx="8" fill="currentColor" />
-            <path d="M17 29a15 15 0 0 0 30 0" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-            <path d="M32 44v10M24 55h16" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-            <path className="voice-assistant-control__sound-wave" d="M51 23c3 4 3 10 0 14M56 18c5 7 5 17 0 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-          </svg>
-          <span className="voice-assistant-control__hint">
-            {voiceControlHint}
-          </span>
-        </button>
-      </aside>
+            {voiceControlMessage ? (
+              <div
+                className="voice-assistant-control__feedback"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {voiceControlMessage}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="voice-assistant-control__button"
+              onClick={handleVoiceAssistantInteraction}
+              disabled={isVoiceSessionRequestPending}
+              aria-pressed={isVoiceSessionActive}
+              aria-label={isVoiceSessionActive ? "结束语音会话" : "开始语音会话"}
+            >
+              <span className="voice-assistant-control__halo" aria-hidden="true" />
+              {interactionNumber > 0 ? (
+                <span
+                  className="voice-assistant-control__interaction-pulse"
+                  key={interactionNumber}
+                  aria-hidden="true"
+                />
+              ) : null}
+              <svg className="voice-assistant-control__icon" viewBox="0 0 64 64" aria-hidden="true">
+                <rect x="24" y="9" width="16" height="31" rx="8" fill="currentColor" />
+                <path d="M17 29a15 15 0 0 0 30 0" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                <path d="M32 44v10M24 55h16" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                <path className="voice-assistant-control__sound-wave" d="M51 23c3 4 3 10 0 14M56 18c5 7 5 17 0 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              </svg>
+              <span className="voice-assistant-control__hint">
+                {voiceControlHint}
+              </span>
+            </button>
+          </aside>
+        </div>
+      </section>
 
       <style jsx>{`
         :global(*) {
@@ -627,9 +626,8 @@ export function RobotConsolePage() {
 
         .chat-card {
           border: 1px solid rgba(36, 26, 18, 0.13);
-          background: rgba(255, 252, 244, 0.76);
+          background: transparent;
           box-shadow: 0 26px 80px rgba(72, 51, 29, 0.16);
-          backdrop-filter: blur(18px);
         }
 
         .chat-card {
@@ -641,10 +639,11 @@ export function RobotConsolePage() {
         }
 
         .chat-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 20px;
+          display: grid;
+          grid-template-columns: 44px minmax(0, 1fr) auto;
+          grid-template-rows: auto auto auto;
+          column-gap: 14px;
+          row-gap: 5px;
           padding: 26px 28px 18px;
           border-bottom: 1px solid rgba(36, 26, 18, 0.1);
         }
@@ -701,6 +700,7 @@ export function RobotConsolePage() {
           display: flex;
           flex-direction: column;
           gap: 18px;
+          background: transparent;
         }
 
         .message {
@@ -802,7 +802,9 @@ export function RobotConsolePage() {
 
       <style jsx>{`
         :global(body) {
-          background: #f3f6fa;
+          background:
+            linear-gradient(rgba(8, 18, 21, 0.36), rgba(8, 18, 21, 0.42)),
+            url('/yingwang-backend.jpg') center / cover no-repeat;
           color: #17212b;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
           overflow-x: hidden;
@@ -824,29 +826,54 @@ export function RobotConsolePage() {
           min-height: 0;
           border: 1px solid #e2e8f0;
           border-radius: 24px;
-          background: #ffffff;
-          box-shadow: 0 20px 60px rgba(38, 62, 86, 0.1);
+          background: transparent;
+          box-shadow: 0 20px 60px rgba(18, 35, 48, 0.22);
+          backdrop-filter: none;
         }
 
         .chat-header {
           min-height: 104px;
           padding: 24px 32px;
-          align-items: center;
+          display: grid;
+          grid-template-columns: 44px minmax(0, 1fr) auto;
+          grid-template-rows: auto auto auto;
+          column-gap: 14px;
+          row-gap: 5px;
           border-bottom: 1px solid #edf1f5;
-          background: #ffffff;
+          background: rgba(255, 255, 255, 0.76);
+          backdrop-filter: blur(12px);
         }
 
-        .brand-lockup {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          min-width: 0;
+        .brand-mark {
+          grid-column: 1;
+          grid-row: 1 / 4;
+          align-self: center;
+        }
+
+        .eyebrow {
+          grid-column: 2;
+          grid-row: 1;
+        }
+
+        .brand-heading-row {
+          grid-column: 2;
+          grid-row: 2;
+        }
+
+        .brand-description {
+          grid-column: 2;
+          grid-row: 3;
+        }
+
+        .status-pill {
+          grid-column: 3;
+          grid-row: 2;
+          align-self: center;
         }
 
         .brand-mark {
           width: 44px;
           height: 44px;
-          flex: 0 0 auto;
           display: grid;
           place-items: center;
           border-radius: 14px;
@@ -864,20 +891,35 @@ export function RobotConsolePage() {
         }
 
         h1 {
-          margin-top: 5px;
+          margin: 0;
           color: #162433;
           font-size: clamp(22px, 3vw, 30px);
           line-height: 1.2;
           letter-spacing: -0.03em;
         }
 
+        .brand-heading-row {
+          display: flex;
+          align-items: center;
+          flex-wrap: nowrap;
+          gap: 14px;
+          min-width: 0;
+        }
+
+        .brand-heading-row h1 {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+
         .brand-description {
-          margin: 5px 0 0;
-          color: #7a8795;
+          margin: 0;
+          color: #536474;
           font-size: 13px;
         }
 
         .status-pill {
+          flex: 0 0 auto;
           padding: 8px 12px;
           border: 1px solid #d7eee9;
           background: #f1fbf8;
@@ -897,7 +939,7 @@ export function RobotConsolePage() {
           min-height: 0;
           padding: 32px 40px;
           gap: 24px;
-          background: linear-gradient(180deg, #fbfcfe 0%, #f7f9fc 100%);
+          background: transparent;
           overscroll-behavior-y: contain;
           scrollbar-gutter: stable;
         }
@@ -926,9 +968,12 @@ export function RobotConsolePage() {
         }
 
         .message-label {
-          display: block;
+          display: inline-block;
           margin: 0 0 6px 3px;
-          color: #8b98a6;
+          padding: 3px 7px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.82);
+          color: #586979;
           font-size: 11px;
         }
 
@@ -989,29 +1034,46 @@ export function RobotConsolePage() {
           background: #4e98a0;
         }
 
+        .voice-assistant-area {
+          position: relative;
+          flex: 0 0 210px;
+          height: 210px;
+          min-height: 210px;
+          overflow: hidden;
+          border-top: 0;
+          background: transparent;
+        }
+
         .voice-assistant-control {
-          position: fixed;
-          right: max(12px, calc((100vw - 1080px) / 2 - 92px));
-          bottom: 28px;
+          position: absolute;
+          left: 50%;
+          right: auto;
+          top: 50%;
           z-index: 31;
-          width: 140px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 8px;
+          width: 108px;
+          height: 108px;
           pointer-events: none;
+          transform: translate(-50%, -50%);
         }
 
         .voice-assistant-control__feedback {
+          position: absolute;
+          left: 50%;
+          bottom: calc(100% + 4px);
+          width: max-content;
+          max-width: min(220px, calc(100vw - 36px));
           border: 1px solid #cce7e8;
           border-radius: 999px;
-          padding: 8px 12px;
+          padding: 6px 10px;
           background: rgba(255, 255, 255, 0.96);
           color: #277d83;
           font-size: 12px;
-          line-height: 1;
-          white-space: nowrap;
+          line-height: 1.3;
+          text-align: center;
+          white-space: normal;
+          overflow-wrap: anywhere;
           box-shadow: 0 8px 20px rgba(35, 101, 165, 0.12);
+          transform: translateX(-50%);
           animation: voice-assistant-feedback 220ms ease-out both;
         }
 
@@ -1074,14 +1136,16 @@ export function RobotConsolePage() {
 
         .voice-assistant-control__hint {
           position: absolute;
-          right: 0;
-          bottom: -28px;
+          left: 50%;
+          right: auto;
+          bottom: -24px;
           width: 108px;
-          color: #668091;
+          color: #4c6474;
           font-size: 11px;
           line-height: 1.2;
           text-align: center;
           pointer-events: none;
+          transform: translateX(-50%);
         }
 
         .voice-assistant-control--listening .voice-assistant-control__button {
@@ -1148,7 +1212,7 @@ export function RobotConsolePage() {
           }
 
           to {
-            transform: scale(1.5);
+            transform: scale(1.25);
             opacity: 0;
           }
         }
@@ -1156,12 +1220,12 @@ export function RobotConsolePage() {
         @keyframes voice-assistant-feedback {
           from {
             opacity: 0;
-            transform: translateY(6px);
+            transform: translate(-50%, 6px);
           }
 
           to {
             opacity: 1;
-            transform: translateY(0);
+            transform: translate(-50%, 0);
           }
         }
 
@@ -1171,18 +1235,16 @@ export function RobotConsolePage() {
           --voice-glow: rgba(67, 164, 188, 0.2);
           position: relative;
           flex: 0 0 auto;
-          min-height: 176px;
+          width: 156px;
+          height: 40px;
+          min-height: 0;
           display: flex;
-          flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          overflow: hidden;
-          border-top: 1px solid #e4ecf2;
-          padding: 20px 40px 24px;
+          padding: 0;
           background:
-            radial-gradient(circle at 50% 18%, var(--voice-glow), transparent 42%),
-            linear-gradient(180deg, #ffffff 0%, #f7fbfd 100%);
+            radial-gradient(circle at 50% 50%, var(--voice-glow), transparent 64%),
+            transparent;
           text-align: center;
         }
 
@@ -1198,10 +1260,16 @@ export function RobotConsolePage() {
           --voice-glow: rgba(82, 137, 214, 0.22);
         }
 
+        .voice-assistant--awake {
+          --voice-wave-start: #38bd72;
+          --voice-wave-end: #168f57;
+          --voice-glow: rgba(22, 143, 87, 0.32);
+        }
+
         .voice-assistant__visual {
           position: relative;
-          width: min(300px, 100%);
-          height: 68px;
+          width: 156px;
+          height: 38px;
           display: grid;
           place-items: center;
         }
@@ -1218,34 +1286,34 @@ export function RobotConsolePage() {
         }
 
         .voice-assistant__visual::before {
-          width: 220px;
-          height: 54px;
+          width: 132px;
+          height: 28px;
           background: var(--voice-glow);
-          filter: blur(18px);
+          filter: blur(11px);
           animation: voice-assistant-glow 2.8s ease-in-out infinite;
         }
 
         .voice-assistant__visual::after {
-          width: 246px;
-          height: 58px;
+          width: 148px;
+          height: 34px;
           border: 1px solid rgba(112, 166, 190, 0.17);
           background: rgba(255, 255, 255, 0.48);
-          box-shadow: inset 0 0 24px rgba(70, 139, 176, 0.06);
+          box-shadow: inset 0 0 12px rgba(70, 139, 176, 0.06);
         }
 
         .voice-assistant__waveform {
           position: relative;
           z-index: 1;
-          width: min(210px, 78vw);
-          height: 46px;
+          width: 124px;
+          height: 28px;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 5px;
+          gap: 4px;
         }
 
         .voice-assistant__waveform span {
-          width: 6px;
+          width: 4px;
           height: 38%;
           flex: 0 0 auto;
           border-radius: 999px;
@@ -1300,19 +1368,20 @@ export function RobotConsolePage() {
           animation-duration: 1.2s;
         }
 
-        .voice-assistant__copy strong {
-          display: block;
-          color: #24465d;
-          font-size: 16px;
-          font-weight: 700;
-          letter-spacing: 0.02em;
+        .voice-assistant__copy {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
         }
 
         .voice-assistant__copy p {
-          margin: 4px 0 0;
-          color: #8293a1;
-          font-size: 12px;
-          line-height: 1.5;
+          margin: 0;
         }
 
         @keyframes voice-assistant-ready {
@@ -1378,14 +1447,46 @@ export function RobotConsolePage() {
           }
 
           .chat-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 14px;
+            grid-template-columns: 44px minmax(0, 1fr);
+            grid-template-rows: auto auto auto;
+            column-gap: 14px;
+            row-gap: 8px;
             padding: 20px 18px;
           }
 
-          .brand-lockup {
-            width: 100%;
+          .brand-heading-row {
+            gap: 8px;
+          }
+
+          .voice-assistant {
+            width: 96px;
+            height: 30px;
+          }
+
+          .voice-assistant__visual {
+            width: 96px;
+            height: 28px;
+          }
+
+          .voice-assistant__visual::before {
+            width: 76px;
+            height: 20px;
+            filter: blur(8px);
+          }
+
+          .voice-assistant__visual::after {
+            width: 90px;
+            height: 26px;
+          }
+
+          .voice-assistant__waveform {
+            width: 72px;
+            height: 20px;
+            gap: 2px;
+          }
+
+          .voice-assistant__waveform span {
+            width: 3px;
           }
 
           .brand-description {
@@ -1393,7 +1494,10 @@ export function RobotConsolePage() {
           }
 
           .status-pill {
-            align-self: flex-start;
+            grid-column: 2;
+            grid-row: 3;
+            align-self: start;
+            justify-self: start;
           }
 
           .messages {
@@ -1415,23 +1519,13 @@ export function RobotConsolePage() {
             max-width: 100%;
           }
 
-          .voice-assistant {
-            min-height: 168px;
-            padding: 18px 18px 22px;
-          }
-
-          .voice-assistant__visual {
-            height: 64px;
-          }
-
-          .voice-assistant__visual::after {
-            width: min(246px, 88vw);
+          .voice-assistant-area {
+            flex-basis: 210px;
           }
 
           .voice-assistant-control {
-            right: 12px;
-            bottom: 204px;
-            width: 124px;
+            width: 92px;
+            height: 92px;
           }
 
           .voice-assistant-control__button {
@@ -1445,15 +1539,8 @@ export function RobotConsolePage() {
           }
 
           .voice-assistant-control__hint {
-            right: 0;
-            bottom: -27px;
+            bottom: -23px;
             width: 92px;
-          }
-        }
-
-        @media (max-width: 420px) {
-          .voice-assistant-control {
-            bottom: 238px;
           }
         }
 
@@ -1466,7 +1553,9 @@ export function RobotConsolePage() {
           }
 
           .voice-assistant__visual::before,
-          .voice-assistant__waveform span {
+          .voice-assistant__waveform span,
+          .voice-assistant--listening .voice-assistant__waveform span,
+          .voice-assistant--processing .voice-assistant__waveform span {
             animation: none;
           }
         }

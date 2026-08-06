@@ -84,6 +84,8 @@ curl http://127.0.0.1:4000/
 
 The container runs Next.js on `0.0.0.0:4000`, and Compose publishes it as host port `4000`.
 
+The runtime image also includes the repository `public/` directory. This is required for the customer page background at `/yingwang-backend.jpg`; copying only the `.next` build directory would leave that asset unavailable in the running container.
+
 ## Reverse proxy
 
 A reverse proxy may expose the application through a domain or HTTPS endpoint and forward traffic to host port `4000`. The browser control endpoint does not require the proxy's internal host to match the public browser origin.

@@ -592,3 +592,82 @@
 - `docs/ROBOT_VOICE_SESSION.md`: documents the blue inactive and green active whole-session microphone semantics.
 - `progress.md`: records the UI scope, verification evidence, and remaining visual check.
 - Rollback: restore the previous microphone dimensions and remove the `voice-assistant-control--awake` button, focus, halo, and pulse overrides in `src/app-home/robot-console-page.js`, then remove the related voice-session documentation paragraph and this progress entry.
+
+## 2026-08-06 - Task: align active voice UI and add the supplied background
+### What was done
+- Reused the whole-session active state to keep both the enlarged microphone and the bottom waveform green from successful start through successful stop, even while listening and processing callbacks change the animation state.
+- Moved the microphone from a viewport-fixed overlay into a reserved right-side area of the bottom voice-status panel so conversation messages remain unobstructed.
+- Added responsive spacing, wrapped control feedback, contained interaction ripples, reduced-motion overrides, and stronger small-text contrast for narrow displays.
+- Optimized the supplied background from about 6.28 MB at 2848x1600 to about 619 KB at 1920x1078, placed it at `public/yingwang-backend.jpg`, and applied it as a centered full-viewport cover image behind translucent frosted surfaces.
+- Included `public/` in the Docker runtime stage so the production container can serve the background asset.
+
+### Testing
+- `npm run build` passed, including production compilation, linting, type validation, static page generation, and route collection.
+- `git diff --check` passed after the final source, deployment, and documentation changes.
+- IDE diagnostics reported no issues in the changed page component or Dockerfile.
+- The optimized asset was verified as a 1920x1078 baseline JPEG with a file size of approximately 619 KB.
+- `docker compose config --quiet` passed. A full image build was not run because the local Docker daemon was unavailable.
+- Browser and Android-device visual verification remain manual checks.
+
+### Notes
+- `src/app-home/robot-console-page.js`: owns the background, frosted foreground, active green waveform, contained microphone layout, and responsive voice panel.
+- `public/yingwang-backend.jpg`: is the optimized landscape background delivered by Next.js.
+- `Dockerfile`: copies `public/` into the runtime image alongside the Next.js build output.
+- `README.md`, `docs/DOCKER_DEPLOYMENT.md`, and `docs/ROBOT_VOICE_SESSION.md`: document the asset location, runtime packaging, and active-session presentation.
+- Rollback: restore the page and Dockerfile, remove `public/yingwang-backend.jpg`, and remove the related README, deployment, voice-session, and progress entries.
+
+## 2026-08-06 - Task: make the conversation background transparent
+### What was done
+- Removed the chat card fill and the message area's gradient and backdrop blur so the supplied page background is visible through the central conversation area.
+- Preserved the frosted header, bottom voice panel, and opaque message bubbles so primary content remains readable.
+- Added compact translucent backing to the small message labels so their contrast does not depend on the image beneath them.
+
+### Testing
+- `npm run build` passed after the conversation background was made transparent.
+- `git diff --check` passed after the final message-label contrast adjustment.
+- IDE diagnostics reported no issues in the changed page component.
+- Real-browser and Android WebView visual verification remain manual checks.
+
+### Notes
+- `src/app-home/robot-console-page.js`: makes the central conversation surface transparent and adds local contrast backing to message labels.
+- `progress.md`: records the completed presentation change and verification evidence.
+- Rollback: restore the previous `.chat-card`, `.messages`, and `.message-label` background-related declarations in `src/app-home/robot-console-page.js`, then remove this progress entry.
+
+## 2026-08-06 - Task: move the waveform to the header and center the microphone
+### What was done
+- Kept the conversation area transparent and discarded the proposed conversation-area frosted-glass treatment.
+- Moved the animated voice waveform beside the main page heading while preserving ready, listening, processing, reduced-motion, and active-session green states.
+- Kept the dynamic voice status copy available to assistive technology without displaying the old bottom status block.
+- Reduced the waveform at narrow widths while keeping it to the heading's right; the heading now wraps internally instead of moving the waveform below it.
+- Centered the microphone in a transparent reserved bottom area and positioned feedback independently above it so feedback cannot move the button or clip its hint and ripple.
+
+### Testing
+- `npm run build` passed after the waveform and microphone layout changes.
+- `git diff --check` passed after the final responsive and feedback-containment corrections.
+- IDE diagnostics reported no issues in the changed page component.
+- An independent static layout review covered 1024, 640, 420, and 375 px widths; real Android WebView visual verification remains a manual check.
+
+### Notes
+- `src/app-home/robot-console-page.js`: moves the waveform into the heading row, centers the microphone, and keeps the conversation and bottom areas transparent.
+- `docs/ROBOT_VOICE_SESSION.md`: documents the new waveform and microphone positions without changing voice-session semantics.
+- `progress.md`: records the final presentation layout and verification evidence.
+- Rollback: move the voice-assistant status section back into the bottom area, restore the previous right-aligned microphone and bottom panel styles, and remove this entry plus the corresponding voice-session documentation update.
+
+## 2026-08-06 - Task: suppress extension hydration noise and align header status
+### What was done
+- Allowed the root HTML element to tolerate attribute differences introduced by browser translation extensions before React hydration, without suppressing mismatches deeper in the application tree.
+- Rebuilt the header as a three-column grid so the title waveform and online-status pill share the same desktop grid row and vertical center rather than being centered against different containers.
+- Kept the title and waveform together on narrow screens while moving the online-status pill to the content row below them to avoid horizontal crowding.
+
+### Testing
+- `npm run build` passed, including production compilation, linting, type validation, static page generation, and route collection.
+- `git diff --check` passed.
+- IDE diagnostics reported no issues in the root layout or page component.
+- Repository search confirmed that the obsolete `brand-lockup` wrapper and selectors were fully removed.
+- Browser-extension injection and final Android WebView rendering remain manual runtime checks.
+
+### Notes
+- `app/layout.js`: adds root-only hydration-warning suppression for externally injected HTML attributes.
+- `src/app-home/robot-console-page.js`: places the brand elements, title waveform, and online status on explicit responsive grid rows.
+- `progress.md`: records the hydration and alignment corrections with their verification evidence.
+- Rollback: remove `suppressHydrationWarning` from the root HTML element, restore the previous nested brand wrapper and flex header, then remove this progress entry.
