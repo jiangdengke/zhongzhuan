@@ -556,3 +556,19 @@
 - `src/app-home/robot-console-page.js`: added message-container auto-scroll and constrained the desktop and mobile flex layout to the viewport.
 - `progress.md`: records implementation scope, verification evidence, and rollback guidance.
 - Rollback: restore `src/app-home/robot-console-page.js` to remove automatic message following and return to page-level growth, then remove this progress entry.
+
+## 2026-08-06 - Task: document the complete repository structure
+### What was done
+- Added a root README that explains the two runnable parts of the repository, the separately managed voice service, and the external DeepSeek dependency.
+- Added an annotated project tree matching each important directory and file to its business responsibility.
+- Documented the runtime topology, three primary voice flows, common change locations, generated files that should not be edited, and the local, Docker, and Android entry points.
+
+### Testing
+- Confirmed every linked document and every key source path referenced by the README exists in the repository.
+- `git diff --check` passed for the documentation changes.
+- IDE diagnostics reported no issues for `README.md` or `progress.md`.
+
+### Notes
+- `README.md`: provides the repository-level project map, responsibility boundaries, operating commands, and troubleshooting order.
+- `progress.md`: records the documentation scope and verification evidence.
+- Rollback: remove `README.md` and this progress entry; no application behavior, interface, deployment configuration, or Android source needs to be reverted.
