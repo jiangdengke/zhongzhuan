@@ -52,6 +52,8 @@ POST http://<voice-service>:9000/robot/voiceSession/control
 
 The returned `sessionId` stays unchanged until the second click. Silence and `POST /robot/voiceMonitor` do not end this whole session.
 
+The customer page uses the floating microphone control as the whole-session indicator. It is blue before the session starts, changes to green immediately after a successful start, and remains green until the user ends the whole session. The bottom waveform can still switch between listening and processing states without changing this active-session microphone color.
+
 On the second microphone click, the page sends the stored ID:
 
 ```json

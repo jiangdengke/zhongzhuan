@@ -572,3 +572,23 @@
 - `README.md`: provides the repository-level project map, responsibility boundaries, operating commands, and troubleshooting order.
 - `progress.md`: records the documentation scope and verification evidence.
 - Rollback: remove `README.md` and this progress entry; no application behavior, interface, deployment configuration, or Android source needs to be reverted.
+
+## 2026-08-06 - Task: enlarge and highlight the active microphone control
+### What was done
+- Increased the floating microphone button from 82 px to 108 px on desktop and from 68 px to 92 px on mobile, with proportionally larger icons and aligned labels.
+- Reused the existing whole-session active modifier so a successfully started voice session immediately turns the microphone button, halo, focus ring, pulse, and shadow green.
+- Kept the active microphone green while listening or processing callbacks update the bottom status panel, then restored the existing blue appearance when the whole session ends.
+- Adjusted the mobile control position to preserve space above the fixed bottom voice-status panel.
+
+### Testing
+- `npm run build` passed, including the Next.js production compile, lint, type validation, and route generation.
+- `git diff --check` passed.
+- IDE diagnostics reported no issues in the changed page component.
+- An independent read-only review found no actionable CSS precedence, responsive-layout, accessibility, or behavior defects.
+- Browser and Android-device visual verification remains pending; exact appearance at desktop, 640 px, and narrow mobile widths is not claimed as manually verified.
+
+### Notes
+- `src/app-home/robot-console-page.js`: enlarges the desktop and mobile microphone control and gives the existing active whole-session state a dominant green visual treatment.
+- `docs/ROBOT_VOICE_SESSION.md`: documents the blue inactive and green active whole-session microphone semantics.
+- `progress.md`: records the UI scope, verification evidence, and remaining visual check.
+- Rollback: restore the previous microphone dimensions and remove the `voice-assistant-control--awake` button, focus, halo, and pulse overrides in `src/app-home/robot-console-page.js`, then remove the related voice-session documentation paragraph and this progress entry.

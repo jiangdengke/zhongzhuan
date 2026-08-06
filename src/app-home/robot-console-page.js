@@ -994,7 +994,7 @@ export function RobotConsolePage() {
           right: max(12px, calc((100vw - 1080px) / 2 - 92px));
           bottom: 28px;
           z-index: 31;
-          width: 112px;
+          width: 140px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -1017,8 +1017,8 @@ export function RobotConsolePage() {
 
         .voice-assistant-control__button {
           position: relative;
-          width: 82px;
-          height: 82px;
+          width: 108px;
+          height: 108px;
           display: grid;
           place-items: center;
           padding: 0;
@@ -1060,17 +1060,11 @@ export function RobotConsolePage() {
           pointer-events: none;
         }
 
-        .voice-assistant-control--awake .voice-assistant-control__halo {
-          border-color: rgba(47, 194, 173, 0.56);
-          background: rgba(47, 194, 173, 0.08);
-          box-shadow: 0 0 20px rgba(47, 194, 173, 0.18);
-        }
-
         .voice-assistant-control__icon {
           position: relative;
           z-index: 1;
-          width: 38px;
-          height: 38px;
+          width: 50px;
+          height: 50px;
         }
 
         .voice-assistant-control__sound-wave {
@@ -1080,9 +1074,9 @@ export function RobotConsolePage() {
 
         .voice-assistant-control__hint {
           position: absolute;
-          right: -31px;
+          right: 0;
           bottom: -28px;
-          width: 82px;
+          width: 108px;
           color: #668091;
           font-size: 11px;
           line-height: 1.2;
@@ -1098,6 +1092,25 @@ export function RobotConsolePage() {
         .voice-assistant-control--processing .voice-assistant-control__button {
           background: linear-gradient(145deg, #579fe5, #706fd8);
           box-shadow: 0 14px 34px rgba(82, 137, 214, 0.3);
+        }
+
+        .voice-assistant-control--awake .voice-assistant-control__button {
+          background: linear-gradient(145deg, #38bd72, #168f57);
+          box-shadow: 0 14px 36px rgba(22, 143, 87, 0.38);
+        }
+
+        .voice-assistant-control--awake .voice-assistant-control__button:focus-visible {
+          outline-color: rgba(22, 143, 87, 0.52);
+        }
+
+        .voice-assistant-control--awake .voice-assistant-control__halo {
+          border-color: rgba(56, 189, 114, 0.68);
+          background: rgba(56, 189, 114, 0.12);
+          box-shadow: 0 0 24px rgba(22, 143, 87, 0.28);
+        }
+
+        .voice-assistant-control--awake .voice-assistant-control__interaction-pulse {
+          border-color: rgba(56, 189, 114, 0.62);
         }
 
         .voice-assistant-control__button:not(:disabled):hover {
@@ -1417,24 +1430,24 @@ export function RobotConsolePage() {
 
           .voice-assistant-control {
             right: 12px;
-            bottom: 190px;
-            width: 88px;
+            bottom: 204px;
+            width: 124px;
           }
 
           .voice-assistant-control__button {
-            width: 68px;
-            height: 68px;
+            width: 92px;
+            height: 92px;
           }
 
           .voice-assistant-control__icon {
-            width: 32px;
-            height: 32px;
+            width: 42px;
+            height: 42px;
           }
 
           .voice-assistant-control__hint {
-            right: -21px;
+            right: 0;
             bottom: -27px;
-            width: 68px;
+            width: 92px;
           }
         }
 
