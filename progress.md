@@ -724,3 +724,31 @@
 - `docs/ROBOT_VOICE_SESSION.md`: documents the exact dual-request contract, state transition rule, retries, and business failures.
 - `progress.md`: records the implementation, verification evidence, changed-file scope, and rollback command.
 - Rollback: restore `.env.example`, `README.md`, `docker-compose.yml`, both updated docs, `progress.md`, `model-response.js`, `voice-session-state.js`, `voice-session.js`, `robot-client/client.js`, and `logger.js` from the pre-task revision, then remove `src/integrations/control-service/`.
+
+## 2026-08-11 - Task: auto-stop inactive voice sessions
+### What was done
+- Added a hidden 60-second inactivity window for active whole voice sessions. A live `voice status: "0"` starts the window, while live speaking, non-empty ASR partial input, or final input cancels it without starting another window until the next `voice status: "0"`.
+- Reused the existing internal voice-session control request and synchronous request lock for manual and automatic stops, with authoritative refs preventing stale-session and duplicate-request races.
+- Kept replayed historical SSE events out of inactivity timing, cleared pending timers across session transitions and unmount, and disabled further automatic attempts for the current session after one timed stop failure so the user can retry manually.
+- Preserved chat history and existing downstream protocols while resetting successful automatic stops to the ready microphone state and showing the exact automatic-end message.
+- Scoped inactivity scheduling and cancellation by comparing each event's carried `robotId` with the authoritative `robotId` returned by the successful start response; explicitly non-matching terminal events cannot affect this page's timer. A response without `robotId` keeps manual session control available but disables event-driven timing and waveform transitions for that session.
+- Kept waveform state transitions separate from chat-history retention: successful stops leave already rendered chat history visible, while delayed non-ready events cannot move the waveform from `ready`.
+
+### Testing
+- `npm run build` passed, including production compilation, linting, type validation, static page generation, and route collection.
+- `git diff --check` passed, and changed-file IDE diagnostics reported no issues.
+- An isolated production page with local voice and control service mocks verified a real timeout: the live `voice status: "0"` response completed at Unix millisecond `1786437773604`, and both downstream stop requests arrived at `1786437833618`, 60,014 milliseconds later, with one stop operation.
+- The real-time success check confirmed that the voice service received the authoritative whole-session ID with `status: "0"`, the control service received exactly `{ "status": "0" }`, the page returned to ready/inactive, the exact `长时间未检测到输入，会话已自动结束` message appeared, and existing chat messages remained visible.
+- Browser-only timer acceleration, without changing repository code or configuration, verified that `voice status: "1"`, non-empty `asr_partial`, and `final_input` each cancel a pending window; no automatic request started from those activity events, and a later `voice status: "0"` started a fresh window.
+- An instrumented manual/timeout race recorded exactly one browser request to `/api/voice-session/control` with `{ "status": "0", "sessionId": <current whole-session ID> }`; the mocks consequently received one voice-service stop and one control-service stop.
+- A forced voice-service failure left the microphone/session active, displayed `语音服务暂时不可用`, issued no later automatic retry after additional activity and `voice status: "0"`, and allowed a successful manual retry after the mock recovered.
+- Focused browser checks also confirmed that `voice status: "0"` does not schedule a stop while no whole session is active and that navigating away immediately after scheduling clears the timer before it can issue a stop.
+- A focused headless-Chrome review harness reran the changed paths with the 60-second timer accelerated in the browser only: another robot's `status: "0"` scheduled no stop, another robot's `status: "1"`, ASR partial, and final input did not cancel the current robot's timer, and matching current-robot events still scheduled or cancelled as specified.
+- The same harness confirmed that successful stop left the waveform `ready` despite delayed non-ready `voice`, `final_input`, and `deepseek_delta` events, while already rendered user and assistant messages remained visible; it also reran the manual/timeout single-request race, one-attempt automatic failure, no-background-retry, and manual-retry paths.
+- A separate missing-`robotId` browser check recorded one start request, no automatic stop after a matching-looking SSE event, and one successful manual stop with the returned session ID. The original real 60,014-millisecond timeout evidence remains applicable because the timeout constant and successful stop path did not change.
+
+### Notes
+- `src/app-home/robot-console-page.js`: adds race-safe, robot-scoped inactivity scheduling and cancellation, shared stop handling, delayed-event waveform guards, one-attempt automatic failure behavior, and timer cleanup.
+- `docs/ROBOT_VOICE_SESSION.md`: replaces the old silence behavior and documents exact triggers, robot scoping, delayed-event rendering, replay, failure, downstream, and UI contracts.
+- `progress.md`: records the implementation scope, verification evidence, and rollback command.
+- Rollback: run `git restore -- src/app-home/robot-console-page.js docs/ROBOT_VOICE_SESSION.md progress.md` before committing these changes.

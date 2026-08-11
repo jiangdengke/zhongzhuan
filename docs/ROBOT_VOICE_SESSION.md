@@ -67,7 +67,11 @@ Content-Type: application/json; charset=utf-8
 
 The control-service body contains exactly the `status` field. It does not receive `robotId` or `sessionId`.
 
-The two outbound requests are attempted concurrently for every accepted start or stop. The whole session becomes active or ended only after both dependencies succeed. The returned `sessionId` stays unchanged until the second click. Silence and `POST /robot/voiceMonitor` do not end this whole session.
+The two outbound requests are attempted concurrently for every accepted start or stop. The whole session becomes active or ended only after both dependencies succeed. The returned `sessionId` stays unchanged until the session ends.
+
+The successful start response includes the authoritative `robotId` and `sessionId`; the page stores both synchronously for event scoping. While a whole session is active, each live, non-replayed `voice` SSE event with `status: "0"` starts one hidden 60-second inactivity window only when the `robotId` carried by the event matches that stored terminal ID. A later live `voice` event with `status: "1"`, a non-empty `asr_partial`, or any `final_input` cancels the pending timer only when the carried `robotId` matches. Explicitly non-matching terminal events cannot schedule or cancel this page's timer. If a contract-violating successful response omits `robotId`, the page keeps the returned session available for manual stop but disables event-driven waveform changes and automatic inactivity timing for that session. Replayed historical SSE events are ignored for inactivity timing because the event envelope explicitly marks them with `replayed: true`. The page does not display a numeric countdown.
+
+If the window expires, the page sends the authoritative current whole-session ID through the same internal `POST /api/voice-session/control` stop path used by the microphone button. It never calls either downstream service directly. The existing synchronous request lock covers manual and timed stops, so a tap racing the timeout still produces at most one stop request.
 
 If one or both dependencies fail, the page request returns HTTP `502` with one exact business error:
 
@@ -75,9 +79,9 @@ If one or both dependencies fail, the page request returns HTTP `502` with one e
 - Control service only: `控制服务暂时不可用`
 - Both services: `语音服务和控制服务暂时不可用`
 
-A failed start retains the generated whole-session ID for the next start attempt but does not expose that pending session to model callbacks, and a failed stop leaves the current session active. Retrying may resend both statuses because repeated voice and control statuses are idempotent.
+A failed start retains the generated whole-session ID for the next start attempt but does not expose that pending session to model callbacks, and a failed stop leaves the current session active. Retrying may resend both statuses because repeated voice and control statuses are idempotent. An automatic stop is attempted only once for the current whole session: if either downstream request fails, the page keeps the microphone active, shows the same service-specific error listed above, schedules no background retry, and waits for a manual stop retry.
 
-The customer page uses the centered bottom microphone and the waveform beside the page heading as whole-session indicators. Both are blue before the session starts, change to green immediately after a successful start, and remain green until the user ends the whole session. Listening and processing callbacks can still change the waveform animation and status copy without overriding the active-session green color. The conversation and bottom microphone areas remain transparent so the page background stays visible, while their reserved layout areas prevent the microphone from covering conversation messages.
+The customer page uses the centered bottom microphone and the waveform beside the page heading as whole-session indicators. Both are blue before the session starts, change to green immediately after a successful start, and remain green until the user ends the whole session. While the whole session is active, non-ready voice, ASR, final-input, and model-progress events for the current terminal may change the waveform animation and status copy; events from another terminal cannot. After a successful stop, already rendered chat history remains visible. Delayed non-ready events cannot move the waveform from `ready`; ready-completion and error events may still restore `ready`. The conversation and bottom microphone areas remain transparent so the page background stays visible, while their reserved layout areas prevent the microphone from covering conversation messages.
 
 The microphone remains touch-responsive while a start or stop request is pending. A repeated tap during that interval shows an immediate `请求处理中，请稍候` acknowledgment and interaction pulse, but a synchronous request lock prevents it from sending another control request. Android touch handling uses the normal click path with `touch-action: manipulation`; no parallel touch handler is registered, so one physical tap cannot produce duplicate start or stop calls.
 
@@ -90,7 +94,7 @@ On the second microphone click, the page sends the stored ID:
 }
 ```
 
-The transit server sends the same whole-session ID to the voice service with `status: "0"` and sends exactly `{ "status": "0" }` to the control service. It injects the configured `ROBOT_ID` only into the voice-service request. After both stop requests succeed, it marks that voice session closed and clears its active model-response accumulator and snapshot. Existing messages remain visible in the page.
+The transit server sends the same whole-session ID to the voice service with `status: "0"` and sends exactly `{ "status": "0" }` to the control service. It injects the configured `ROBOT_ID` only into the voice-service request. After both stop requests succeed, it marks that voice session closed and clears its active model-response accumulator and snapshot. The page records the ended session, clears its authoritative session ID and React session state, returns the voice assistant to `ready`, and keeps existing messages visible. A timed stop additionally shows exactly `长时间未检测到输入，会话已自动结束`.
 
 ## Voice-service model callbacks
 

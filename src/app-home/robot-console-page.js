@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { sendVoiceSessionControl, subscribeRobotEvents } from "./chat-api.js";
+
+const VOICE_SESSION_INACTIVITY_TIMEOUT_MS = 60_000;
 
 const initialMessages = [
   {
@@ -55,6 +57,25 @@ function getUpstreamConversationKey(event, data) {
 
 function readText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isEventForActiveVoiceSession({
+  data,
+  activeVoiceSessionId,
+  activeVoiceSessionRobotId,
+  requireRobotId = false,
+}) {
+  if (!activeVoiceSessionId || !activeVoiceSessionRobotId) {
+    return false;
+  }
+
+  const eventRobotId = readText(data.robotId);
+
+  if (!eventRobotId) {
+    return !requireRobotId;
+  }
+
+  return eventRobotId === activeVoiceSessionRobotId;
 }
 
 function parseJsonObject(value) {
@@ -192,7 +213,100 @@ export function RobotConsolePage() {
   const processedRobotEventIdsRef = useRef(new Set());
   const endedVoiceSessionIdsRef = useRef(new Set());
   const voiceSessionIdRef = useRef("");
+  const voiceSessionRobotIdRef = useRef("");
   const voiceSessionRequestLockRef = useRef(false);
+  const voiceSessionInactivityTimerRef = useRef(null);
+  const automaticStopFailedSessionIdRef = useRef("");
+
+  const clearVoiceSessionInactivityTimer = useCallback(() => {
+    if (voiceSessionInactivityTimerRef.current === null) {
+      return;
+    }
+
+    clearTimeout(voiceSessionInactivityTimerRef.current);
+    voiceSessionInactivityTimerRef.current = null;
+  }, []);
+
+  const stopActiveVoiceSession = useCallback(async ({ isAutomatic }) => {
+    clearVoiceSessionInactivityTimer();
+
+    if (voiceSessionRequestLockRef.current) {
+      return;
+    }
+
+    const activeVoiceSessionId = voiceSessionIdRef.current;
+
+    if (!activeVoiceSessionId) {
+      return;
+    }
+
+    voiceSessionRequestLockRef.current = true;
+    setVoiceSessionRequestState("stopping");
+    setVoiceControlMessage("正在结束语音会话");
+
+    try {
+      await sendVoiceSessionControl({
+        status: "0",
+        sessionId: activeVoiceSessionId,
+      });
+
+      endedVoiceSessionIdsRef.current.add(activeVoiceSessionId);
+
+      if (endedVoiceSessionIdsRef.current.size > 100) {
+        const oldestSessionId = endedVoiceSessionIdsRef.current.values().next().value;
+        endedVoiceSessionIdsRef.current.delete(oldestSessionId);
+      }
+
+      automaticStopFailedSessionIdRef.current = "";
+      voiceSessionIdRef.current = "";
+      voiceSessionRobotIdRef.current = "";
+      setVoiceSessionId("");
+      setVoiceAssistantState("ready");
+      setVoiceControlMessage(isAutomatic
+        ? "长时间未检测到输入，会话已自动结束"
+        : "语音会话已结束");
+    } catch (error) {
+      if (isAutomatic) {
+        automaticStopFailedSessionIdRef.current = activeVoiceSessionId;
+      }
+
+      setVoiceControlMessage(error instanceof Error && error.message
+        ? error.message
+        : "结束失败，请再次点击重试");
+    } finally {
+      clearVoiceSessionInactivityTimer();
+      voiceSessionRequestLockRef.current = false;
+      setVoiceSessionRequestState("idle");
+    }
+  }, [clearVoiceSessionInactivityTimer]);
+
+  const scheduleVoiceSessionInactivityStop = useCallback((eventRobotId) => {
+    const activeVoiceSessionId = voiceSessionIdRef.current;
+    const activeVoiceSessionRobotId = voiceSessionRobotIdRef.current;
+
+    if (
+      !activeVoiceSessionId ||
+      !activeVoiceSessionRobotId ||
+      activeVoiceSessionRobotId !== eventRobotId ||
+      automaticStopFailedSessionIdRef.current === activeVoiceSessionId
+    ) {
+      return;
+    }
+
+    clearVoiceSessionInactivityTimer();
+    voiceSessionInactivityTimerRef.current = setTimeout(() => {
+      voiceSessionInactivityTimerRef.current = null;
+
+      if (
+        voiceSessionIdRef.current !== activeVoiceSessionId ||
+        voiceSessionRobotIdRef.current !== activeVoiceSessionRobotId
+      ) {
+        return;
+      }
+
+      void stopActiveVoiceSession({ isAutomatic: true });
+    }, VOICE_SESSION_INACTIVITY_TIMEOUT_MS);
+  }, [clearVoiceSessionInactivityTimer, stopActiveVoiceSession]);
 
   useEffect(() => {
     const messagesContainer = messagesContainerRef.current;
@@ -409,10 +523,31 @@ export function RobotConsolePage() {
       }
     }
 
-    return subscribeRobotEvents({
+    const unsubscribe = subscribeRobotEvents({
       onEvent: (eventName, event, eventMetadata) => {
         const data = event?.data || event || {};
         const isModelResponseEvent = eventName.startsWith("model_response_");
+
+        if (!event?.replayed) {
+          const isVoiceActivity = eventName === "voice" && data.status === "1";
+          const hasAsrActivity = eventName === "asr_partial" && Boolean(readText(data.content));
+          const hasFinalInput = eventName === "final_input";
+          const isMatchingActiveRobotEvent = isEventForActiveVoiceSession({
+            data,
+            activeVoiceSessionId: voiceSessionIdRef.current,
+            activeVoiceSessionRobotId: voiceSessionRobotIdRef.current,
+            requireRobotId: true,
+          });
+
+          if (
+            (isVoiceActivity || hasAsrActivity || hasFinalInput) &&
+            isMatchingActiveRobotEvent
+          ) {
+            clearVoiceSessionInactivityTimer();
+          } else if (eventName === "voice" && data.status === "0") {
+            scheduleVoiceSessionInactivityStop(readText(data.robotId));
+          }
+        }
 
         if (
           isModelResponseEvent &&
@@ -424,14 +559,26 @@ export function RobotConsolePage() {
 
         const nextVoiceAssistantState = getVoiceAssistantState(eventName, data);
 
-        if (nextVoiceAssistantState) {
+        const canUpdateVoiceAssistant = nextVoiceAssistantState === "ready"
+          || isEventForActiveVoiceSession({
+            data,
+            activeVoiceSessionId: voiceSessionIdRef.current,
+            activeVoiceSessionRobotId: voiceSessionRobotIdRef.current,
+          });
+
+        if (nextVoiceAssistantState && canUpdateVoiceAssistant) {
           setVoiceAssistantState(nextVoiceAssistantState);
         }
 
         applyUpstreamChatEvent(eventName, event, data, eventMetadata);
       },
     });
-  }, []);
+
+    return () => {
+      unsubscribe();
+      clearVoiceSessionInactivityTimer();
+    };
+  }, [clearVoiceSessionInactivityTimer, scheduleVoiceSessionInactivityStop]);
 
   const voiceAssistantCopy = voiceAssistantStatusCopy[voiceAssistantState];
   const isVoiceSessionActive = Boolean(voiceSessionId);
@@ -458,56 +605,38 @@ export function RobotConsolePage() {
       return;
     }
 
-    voiceSessionRequestLockRef.current = true;
+    clearVoiceSessionInactivityTimer();
     const activeVoiceSessionId = voiceSessionIdRef.current;
-    const nextStatus = activeVoiceSessionId ? "0" : "1";
-    const nextRequestState = activeVoiceSessionId ? "stopping" : "starting";
-    const pendingControlMessage = activeVoiceSessionId
-      ? "正在结束语音会话"
-      : "正在开启语音会话";
-    const voiceControlRequest = {
-      status: nextStatus,
-      sessionId: activeVoiceSessionId,
-    };
-
-    setVoiceSessionRequestState(nextRequestState);
-    setVoiceControlMessage(pendingControlMessage);
     setInteractionNumber((currentNumber) => currentNumber + 1);
 
+    if (activeVoiceSessionId) {
+      await stopActiveVoiceSession({ isAutomatic: false });
+      return;
+    }
+
+    voiceSessionRequestLockRef.current = true;
+    automaticStopFailedSessionIdRef.current = "";
+    setVoiceSessionRequestState("starting");
+    setVoiceControlMessage("正在开启语音会话");
+
     try {
-      const result = await sendVoiceSessionControl(voiceControlRequest);
+      const result = await sendVoiceSessionControl({ status: "1" });
+      const startedVoiceSessionRobotId = readText(result.robotId);
 
-      if (nextStatus === "1") {
-        if (!result.sessionId) {
-          throw new Error("服务未返回会话标识");
-        }
-
-        voiceSessionIdRef.current = result.sessionId;
-        setVoiceSessionId(result.sessionId);
-        setVoiceControlMessage("语音会话进行中");
-        return;
+      if (!result.sessionId) {
+        throw new Error("服务未返回会话标识");
       }
 
-      endedVoiceSessionIdsRef.current.add(activeVoiceSessionId);
-
-      if (endedVoiceSessionIdsRef.current.size > 100) {
-        const oldestSessionId = endedVoiceSessionIdsRef.current.values().next().value;
-        endedVoiceSessionIdsRef.current.delete(oldestSessionId);
-      }
-
-      voiceSessionIdRef.current = "";
-      setVoiceSessionId("");
-      setVoiceAssistantState("ready");
-      setVoiceControlMessage("语音会话已结束");
+      voiceSessionRobotIdRef.current = startedVoiceSessionRobotId;
+      voiceSessionIdRef.current = result.sessionId;
+      setVoiceSessionId(result.sessionId);
+      setVoiceControlMessage("语音会话进行中");
     } catch (error) {
-      const fallbackMessage = nextStatus === "0"
-        ? "结束失败，请再次点击重试"
-        : "开启失败，请检查语音服务连接";
-
       setVoiceControlMessage(error instanceof Error && error.message
         ? error.message
-        : fallbackMessage);
+        : "开启失败，请检查语音服务连接");
     } finally {
+      clearVoiceSessionInactivityTimer();
       voiceSessionRequestLockRef.current = false;
       setVoiceSessionRequestState("idle");
     }
