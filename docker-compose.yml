@@ -17,6 +17,7 @@ services:
       LOG_FILE_MAX_BACKUPS: "2"
       LOG_FILE_RETENTION_DAYS: "7"
       ROBOT_CLIENT_BASE_URL: http://host.docker.internal:9000
+      CONTROL_SERVICE_BASE_URL: ${CONTROL_SERVICE_BASE_URL:-http://host.docker.internal:4001}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     logging:

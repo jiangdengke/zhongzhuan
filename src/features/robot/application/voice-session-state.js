@@ -35,6 +35,11 @@ export function readVoiceSession(robotId) {
   return getVoiceSessionState().sessionsByRobotId.get(robotId) || null;
 }
 
+export function readActiveVoiceSession(robotId) {
+  const currentSession = readVoiceSession(robotId);
+  return currentSession?.phase === "active" ? currentSession : null;
+}
+
 export function rememberVoiceSession({ robotId, sessionId, phase, startedAt }) {
   const state = getVoiceSessionState();
   state.sessionsByRobotId.set(robotId, {

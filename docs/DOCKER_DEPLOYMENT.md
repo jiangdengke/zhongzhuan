@@ -7,24 +7,28 @@ This Compose configuration deploys only the transit service:
 ```text
 External client -> host:4000 -> transit-server container
 transit-server container -> host.docker.internal:9000 -> voice service on host
+transit-server container -> host.docker.internal:4001 -> control service on host
 ```
 
-The voice service is managed separately and is not part of this Compose project. The existing `ROBOT_CLIENT_*` environment names and `robotId` protocol field are compatibility names; operational logs describe this dependency as the voice service and the configured device as the terminal.
+The voice service and control service are managed separately and are not part of this Compose project. The existing `ROBOT_CLIENT_*` environment names and `robotId` protocol field are compatibility names; operational logs describe this dependency as the voice service and the configured device as the terminal.
 
 ## Prerequisites
 
 1. Install Docker Engine with the Compose plugin.
 2. Create `.env` from `.env.example` and provide the required model credentials.
-3. Run the voice service on the same host at port `9000`.
-4. On Linux, make the voice service listen on `0.0.0.0:9000` or another address reachable through the Docker host gateway. A process listening only on `127.0.0.1:9000` is generally not reachable from a Linux container through `host.docker.internal`.
-5. On Linux, allow TCP port `9000` from the Compose bridge subnet through the host firewall. Scope this rule to the Docker subnet instead of exposing the voice service to untrusted networks.
+3. Run the voice service and control service on the same host at ports `9000` and `4001`.
+4. On Linux, make both dependencies listen on `0.0.0.0` or another address reachable through the Docker host gateway. A process listening only on `127.0.0.1` is generally not reachable from a Linux container through `host.docker.internal`.
+5. On Linux, allow TCP ports `9000` and `4001` from the Compose bridge subnet through the host firewall. Scope these rules to the Docker subnet instead of exposing either dependency to untrusted networks.
 6. Allow inbound TCP port `4000` through the host firewall when other machines need to call the transit service.
 
-The Compose file injects this container-specific address without changing the native `.env` value:
+The Compose file injects these container-specific defaults without changing the native runtime defaults:
 
 ```env
 ROBOT_CLIENT_BASE_URL=http://host.docker.internal:9000
+CONTROL_SERVICE_BASE_URL=http://host.docker.internal:4001
 ```
+
+Keep `CONTROL_SERVICE_BASE_URL` blank in `.env` to use `localhost:4001` for native runs and the host-gateway address above for Compose. Set it to a non-empty HTTP(S) URL when both native and Compose runs should use another reachable control-service address.
 
 It also maps `host.docker.internal` to Docker's host gateway for Linux compatibility.
 
@@ -67,7 +71,7 @@ One `回复+` line represents one fragment actually received from DeepSeek or `/
 
 ```text
 09:03:13.145 WARN  ⚠️ 回调忽略 | 终端=4 | 话轮=9c1ae54c | 原因=未收到模型开始回调
-09:03:13.146 ERROR ❌ 语音服务请求失败 | 会话=b492d50e | HTTP=502 | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT | 追踪=a4623f8d
+09:03:13.146 ERROR ❌ 会话控制请求失败 | 终端=4 | 会话=b492d50e | 状态=1 | 服务=控制服务 | 接口="POST /robot/voiceSession/control" | 耗时=5002ms | 超时=5000ms | 原因=连接超时 代码=ETIMEDOUT | 地址=http://host.docker.internal:4001/robot/voiceSession/control | 追踪=a4623f8d
 ```
 
 Set `LOG_FORMAT=json` when complete structured records are required. JSON mode retains directions, routes, services, full identifiers, HTTP metadata, timing fields, and content. Model callbacks are associated with the current whole session by `robotId`; an optional voice-service `sessionId` is retained as `话轮` and is not compared with the whole-session ID. View the readable output with:
@@ -112,7 +116,7 @@ To remove the retained application logs as well:
 docker compose down --volumes
 ```
 
-## Troubleshooting voice-service access
+## Troubleshooting dependency access
 
 Test host resolution from the running container:
 
@@ -123,15 +127,24 @@ docker compose exec transit-server \
 
 This command sends a real stop control request. Use it only when doing an explicit connectivity test with the voice service owner.
 
-The transit service sends voice control requests with `Connection: close` and consumes the response body before completing the request. This gives the separately managed Python voice service an explicit, orderly connection lifecycle and avoids resetting a reused connection after a successful `200` response.
-
-If the request cannot connect on Linux, verify the voice service listener on the host:
+Test control-service access separately:
 
 ```bash
-ss -lntp | grep ':9000'
+docker compose exec transit-server \
+  node -e "fetch('http://host.docker.internal:4001/robot/voiceSession/control', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ status: '0' }) }).then(async (response) => console.log(response.status, await response.text())).catch((error) => { console.error(error); process.exit(1); })"
 ```
 
-The listener should not be limited to `127.0.0.1:9000` for this topology.
+This also sends a real stop status. The control-service body is exactly `{ "status": "0" }`; run it only with the control-service owner approval.
+
+The transit service sends both dependency requests with `Connection: close` and consumes each response body before completing the request. This gives the separately managed services an explicit, orderly connection lifecycle and avoids resetting a reused connection after a successful `200` response.
+
+If either request cannot connect on Linux, verify both listeners on the host:
+
+```bash
+ss -lntp | grep -E ':(9000|4001)'
+```
+
+The listeners should not be limited to `127.0.0.1` for this topology.
 
 Find the Compose network subnet:
 
@@ -140,11 +153,12 @@ docker network inspect zhongzhuan_default \
   --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
 ```
 
-Then inspect the host firewall and allow that subnet to reach TCP port `9000`. For example, with UFW:
+Then inspect the host firewall and allow that subnet to reach TCP ports `9000` and `4001`. For example, with UFW:
 
 ```bash
 sudo ufw status
 sudo ufw allow from <compose-subnet> to any port 9000 proto tcp
+sudo ufw allow from <compose-subnet> to any port 4001 proto tcp
 ```
 
-For firewalld, inspect the active zones and add an equivalent source-scoped rule. Do not add an unrestricted public rule for port `9000` unless the voice service has separate authentication and network protections.
+For firewalld, inspect the active zones and add equivalent source-scoped rules. Do not add unrestricted public rules for ports `9000` or `4001` unless the dependencies have separate authentication and network protections.

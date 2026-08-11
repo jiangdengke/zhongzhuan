@@ -1,5 +1,10 @@
 import { randomUUID } from "crypto";
 import {
+  getControlServiceVoiceSessionControlTarget,
+  sendControlServiceVoiceSessionControl,
+} from "@/integrations/control-service/client.js";
+import { controlServiceConfig } from "@/integrations/control-service/config.js";
+import {
   getRobotVoiceSessionControlTarget,
   sendVoiceSessionControl,
 } from "@/integrations/robot-client/client.js";
@@ -17,6 +22,9 @@ import {
 
 const VOICE_SESSION_STARTED = "1";
 const VOICE_SESSION_ENDED = "0";
+const VOICE_SESSION_CONTROL_ROUTE = "POST /robot/voiceSession/control";
+const VOICE_SERVICE_NAME = "语音服务";
+const CONTROL_SERVICE_NAME = "控制服务";
 
 function createVoiceSessionId() {
   return `session-${randomUUID()}`;
@@ -40,9 +48,106 @@ export function createInvalidVoiceSessionJsonResult({
   return createValidationError(traceId, "Invalid JSON");
 }
 
+function createControlFailureMessage({ voiceServiceFailed, controlServiceFailed }) {
+  if (voiceServiceFailed && controlServiceFailed) {
+    return "语音服务和控制服务暂时不可用";
+  }
+
+  return voiceServiceFailed ? "语音服务暂时不可用" : "控制服务暂时不可用";
+}
+
+async function forwardVoiceSessionControl({ robotId, sessionId, status, traceId }) {
+  const dependencies = [
+    {
+      service: VOICE_SERVICE_NAME,
+      requestDirection: "中转服务→语音服务",
+      responseDirection: "语音服务→中转服务",
+      target: getRobotVoiceSessionControlTarget(),
+      timeoutMs: robotClientConfig.timeoutMs,
+      send: () => sendVoiceSessionControl({ robotId, sessionId, status }),
+    },
+    {
+      service: CONTROL_SERVICE_NAME,
+      requestDirection: "中转服务→控制服务",
+      responseDirection: "控制服务→中转服务",
+      target: getControlServiceVoiceSessionControlTarget(),
+      timeoutMs: controlServiceConfig.timeoutMs,
+      send: () => sendControlServiceVoiceSessionControl({ status }),
+    },
+  ];
+
+  for (const dependency of dependencies) {
+    logInfo("voiceSession", "control_sending", {
+      direction: dependency.requestDirection,
+      traceId,
+      route: VOICE_SESSION_CONTROL_ROUTE,
+      service: dependency.service,
+      robotId,
+      wholeSessionId: sessionId,
+      status,
+      target: dependency.target,
+      timeoutMs: dependency.timeoutMs,
+    });
+  }
+
+  const dependencyResults = await Promise.allSettled(
+    dependencies.map((dependency) => dependency.send()),
+  );
+
+  dependencyResults.forEach((dependencyResult, index) => {
+    const dependency = dependencies[index];
+
+    if (dependencyResult.status === "fulfilled") {
+      logInfo("voiceSession", "forward_succeeded", {
+        direction: dependency.responseDirection,
+        traceId,
+        route: VOICE_SESSION_CONTROL_ROUTE,
+        service: dependency.service,
+        robotId,
+        wholeSessionId: sessionId,
+        status,
+        statusCode: dependencyResult.value.status,
+        target: dependencyResult.value.targetUrl,
+        durationMs: dependencyResult.value.durationMs,
+        outcome: "已接收",
+      });
+      return;
+    }
+
+    const error = dependencyResult.reason;
+    logError("voiceSession", "control_failed", {
+      direction: dependency.responseDirection,
+      traceId,
+      route: VOICE_SESSION_CONTROL_ROUTE,
+      service: dependency.service,
+      robotId,
+      wholeSessionId: sessionId,
+      status,
+      target: error?.targetUrl ?? dependency.target,
+      durationMs: error?.durationMs,
+      timeoutMs: error?.timeoutMs ?? dependency.timeoutMs,
+      statusCode: error?.statusCode,
+      error,
+    });
+  });
+
+  const voiceServiceFailed = dependencyResults[0].status === "rejected";
+  const controlServiceFailed = dependencyResults[1].status === "rejected";
+
+  if (voiceServiceFailed || controlServiceFailed) {
+    return {
+      ok: false,
+      error: createControlFailureMessage({ voiceServiceFailed, controlServiceFailed }),
+    };
+  }
+
+  return { ok: true };
+}
+
 async function startVoiceSession({ robotId, traceId }) {
   const currentSession = readVoiceSession(robotId);
   const sessionId = currentSession?.sessionId ?? createVoiceSessionId();
+  const isAlreadyActive = currentSession?.phase === "active";
 
   logInfo("voiceSession", currentSession ? "session_reused" : "session_created", {
     direction: "中转内部",
@@ -50,71 +155,33 @@ async function startVoiceSession({ robotId, traceId }) {
     robotId,
     wholeSessionId: sessionId,
     status: VOICE_SESSION_STARTED,
-    association: currentSession ? "上次启动失败后的重试" : "首次点击开始",
+    association: isAlreadyActive
+      ? "活动会话重复开始"
+      : currentSession
+        ? "上次启动失败后的重试"
+        : "首次点击开始",
   });
 
   rememberVoiceSession({
     robotId,
     sessionId,
-    phase: "starting",
+    phase: isAlreadyActive ? "active" : "starting",
     startedAt: currentSession?.startedAt ?? Date.now(),
   });
 
-  logInfo("voiceSession", "control_sending", {
-    direction: "中转服务→语音服务",
-    traceId,
-    route: "POST /robot/voiceSession/control",
-    service: "语音服务",
+  const forwardResult = await forwardVoiceSessionControl({
     robotId,
-    wholeSessionId: sessionId,
+    sessionId,
     status: VOICE_SESSION_STARTED,
-    target: getRobotVoiceSessionControlTarget(),
-    timeoutMs: robotClientConfig.timeoutMs,
+    traceId,
   });
 
-  let controlResult;
-
-  try {
-    controlResult = await sendVoiceSessionControl({
-      robotId,
-      sessionId,
-      status: VOICE_SESSION_STARTED,
-    });
-  } catch (error) {
-    logError("voiceSession", "control_failed", {
-      direction: "语音服务→中转服务",
-      traceId,
-      route: "POST /robot/voiceSession/control",
-      service: "语音服务",
-      robotId,
-      wholeSessionId: sessionId,
-      status: VOICE_SESSION_STARTED,
-      target: error.targetUrl ?? getRobotVoiceSessionControlTarget(),
-      durationMs: error.durationMs,
-      timeoutMs: error.timeoutMs ?? robotClientConfig.timeoutMs,
-      statusCode: error.statusCode,
-      error,
-    });
-
+  if (!forwardResult.ok) {
     return createResult(502, traceId, {
       ok: false,
-      error: "语音服务暂时不可用",
+      error: forwardResult.error,
     });
   }
-
-  logInfo("voiceSession", "forward_succeeded", {
-    direction: "语音服务→中转服务",
-    traceId,
-    route: "POST /robot/voiceSession/control",
-    service: "语音服务",
-    robotId,
-    wholeSessionId: sessionId,
-    status: VOICE_SESSION_STARTED,
-    statusCode: controlResult.status,
-    target: controlResult.targetUrl,
-    durationMs: controlResult.durationMs,
-    outcome: "已接收",
-  });
 
   rememberVoiceSession({
     robotId,
@@ -129,8 +196,6 @@ async function startVoiceSession({ robotId, traceId }) {
     robotId,
     wholeSessionId: sessionId,
     status: VOICE_SESSION_STARTED,
-    target: controlResult.targetUrl,
-    durationMs: controlResult.durationMs,
   });
 
   return createResult(200, traceId, {
@@ -197,61 +262,19 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
     });
   }
 
-  logInfo("voiceSession", "control_sending", {
-    direction: "中转服务→语音服务",
-    traceId,
-    route: "POST /robot/voiceSession/control",
-    service: "语音服务",
+  const forwardResult = await forwardVoiceSessionControl({
     robotId,
-    wholeSessionId: requestedSessionId,
+    sessionId: requestedSessionId,
     status: VOICE_SESSION_ENDED,
-    target: getRobotVoiceSessionControlTarget(),
-    timeoutMs: robotClientConfig.timeoutMs,
+    traceId,
   });
 
-  let controlResult;
-
-  try {
-    controlResult = await sendVoiceSessionControl({
-      robotId,
-      sessionId: requestedSessionId,
-      status: VOICE_SESSION_ENDED,
-    });
-  } catch (error) {
-    logError("voiceSession", "control_failed", {
-      direction: "语音服务→中转服务",
-      traceId,
-      route: "POST /robot/voiceSession/control",
-      service: "语音服务",
-      robotId,
-      wholeSessionId: requestedSessionId,
-      status: VOICE_SESSION_ENDED,
-      target: error.targetUrl ?? getRobotVoiceSessionControlTarget(),
-      durationMs: error.durationMs,
-      timeoutMs: error.timeoutMs ?? robotClientConfig.timeoutMs,
-      statusCode: error.statusCode,
-      error,
-    });
-
+  if (!forwardResult.ok) {
     return createResult(502, traceId, {
       ok: false,
-      error: "语音服务暂时不可用",
+      error: forwardResult.error,
     });
   }
-
-  logInfo("voiceSession", "forward_succeeded", {
-    direction: "语音服务→中转服务",
-    traceId,
-    route: "POST /robot/voiceSession/control",
-    service: "语音服务",
-    robotId,
-    wholeSessionId: requestedSessionId,
-    status: VOICE_SESSION_ENDED,
-    statusCode: controlResult.status,
-    target: controlResult.targetUrl,
-    durationMs: controlResult.durationMs,
-    outcome: "已接收",
-  });
 
   const endedAt = Date.now();
   markVoiceSessionEnded({ robotId, sessionId: requestedSessionId });
@@ -263,8 +286,6 @@ async function endVoiceSession({ robotId, requestedSessionId, traceId }) {
     robotId,
     wholeSessionId: requestedSessionId,
     status: VOICE_SESSION_ENDED,
-    target: controlResult.targetUrl,
-    durationMs: controlResult.durationMs,
     sessionDurationMs: endedAt - currentSession.startedAt,
   });
 

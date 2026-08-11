@@ -5,7 +5,7 @@
 1. 运行在 `4000` 端口的 Next.js 页面和中转服务；
 2. 用于安卓终端安装的 Capacitor APK 壳工程。
 
-语音服务不在本仓库中，它由其他服务单独运行在 `9000` 端口。DeepSeek 也是外部服务，由中转服务根据配置调用。
+语音服务和控制服务不在本仓库中，它们分别由其他服务运行在 `9000` 和 `4001` 端口。DeepSeek 也是外部服务，由中转服务根据配置调用。
 
 ## 项目结构
 
@@ -33,6 +33,7 @@
 │   │   └── domain/constants.js               # 固定命令等领域常量
 │   ├── integrations/                         # 外部服务访问层
 │   │   ├── robot-client/                     # 调用语音服务，名称为兼容旧协议保留
+│   │   ├── control-service/                  # 调用终端行为控制服务
 │   │   └── deepseek/                         # 调用 DeepSeek 模型
 │   └── shared/                               # 日志、HTTP、SSE 和通用字符串工具
 │
@@ -66,10 +67,9 @@
 ## 整体运行关系
 
 ```text
-浏览器 ───────────────┐
-                     ├──> 中转服务 :4000 ───> 语音服务 :9000
-Android APK 全屏页面 ─┘          │
-                                └──> DeepSeek
+浏览器 ───────────────┐                          ┌──> 语音服务 :9000
+                     ├──> 中转服务 :4000 ──────┼──> 控制服务 :4001
+Android APK 全屏页面 ─┘                          └──> DeepSeek
 
 语音服务回调 ───> 中转服务 :4000 ───SSE──> 页面或 Android APK
 ```
@@ -78,11 +78,12 @@ Android APK 全屏页面 ─┘          │
 
 | 部分 | 负责内容 | 不负责内容 |
 | --- | --- | --- |
-| 页面 | 展示对话、语音状态、流式回复和会话按钮 | 不直接访问语音服务或 DeepSeek |
-| 中转服务 | 管理整段会话、转发控制、处理回调、调用 DeepSeek、推送 SSE | 不采集底层音频 |
+| 页面 | 展示对话、语音状态、流式回复和会话按钮 | 不直接访问语音服务、控制服务或 DeepSeek |
+| 中转服务 | 管理整段会话、同时转发语音和终端行为控制、处理回调、调用 DeepSeek、推送 SSE | 不采集底层音频 |
 | 语音服务 | 语音采集、识别、语音状态和语音服务侧模型处理 | 不在本仓库中部署 |
+| 控制服务 | 根据整段会话开始/结束状态暂停或恢复迎宾、巡航和导航行为 | 不接收浏览器或 Android APK 的直接请求 |
 | DeepSeek | 在中转服务需要模型回答时生成文本 | 不直接与页面通信 |
-| Android APK | 用全屏 WebView 打开中转页面 | 不包含中转服务，也不包含语音服务 |
+| Android APK | 用全屏 WebView 打开中转页面 | 不包含中转服务、语音服务或控制服务 |
 
 > `ROBOT_CLIENT_BASE_URL`、`ROBOT_ID`、`robotId` 和 `/robot/*` 是现有协议兼容名称。业务上对应的是“语音服务”和“终端”，不是另一个机器人服务。
 
@@ -94,10 +95,11 @@ Android APK 全屏页面 ─┘          │
 页面点击麦克风
   -> POST /api/voice-session/control
   -> 中转服务生成并保存整段 sessionId
-  -> POST 语音服务 /robot/voiceSession/control
+  -> 同时 POST 语音服务 :9000 /robot/voiceSession/control
+  -> 同时 POST 控制服务 :4001 /robot/voiceSession/control
 ```
 
-第一次点击发送 `status: "1"`，第二次点击复用同一个整段 `sessionId` 并发送 `status: "0"`。一次静音或一次说话结束不会自动关闭整段会话。
+第一次点击发送 `status: "1"`，第二次点击复用同一个整段 `sessionId` 并发送 `status: "0"`。语音服务继续接收 `{robotId, sessionId, status}`，控制服务只接收 `{status}`；只有两个服务都成功后，整段会话状态才会推进。一次静音或一次说话结束不会自动关闭整段会话。
 
 ### 2. 识别、固定命令和 DeepSeek 回复
 
@@ -130,6 +132,7 @@ POST /robot/model/response_monitor  status="1"
 | 修改整段语音会话行为 | `src/features/robot/application/voice-session.js` |
 | 修改 ASR 或模型回调处理 | `src/features/robot/application/listen-qwen.js`、`src/features/robot/application/model-response.js` |
 | 修改中转到语音服务的请求 | `src/integrations/robot-client/` |
+| 修改中转到控制服务的请求 | `src/integrations/control-service/` |
 | 修改 DeepSeek 参数或请求行为 | `.env`、`src/integrations/deepseek/` |
 | 修改日志显示格式 | `src/shared/logging/logger.js` |
 | 修改页面背景图片 | `public/yingwang-backend.jpg` |
@@ -137,7 +140,7 @@ POST /robot/model/response_monitor  status="1"
 | 修改 Android 横屏或权限 | `android-app/android/app/src/main/AndroidManifest.xml` |
 | 修改 Android 全屏行为 | `android-app/android/app/src/main/java/com/zhongzhauan/voiceassistant/MainActivity.java` |
 | 修改 Android 图标或启动图 | `android-app/android/app/src/main/res/` |
-| 修改容器端口或宿主机语音服务地址 | `docker-compose.yml` |
+| 修改容器端口或宿主机语音、控制服务地址 | `docker-compose.yml` |
 
 ## 不要直接修改的生成文件
 
@@ -177,9 +180,13 @@ cp .env.example .env
 DEEPSEEK_API_KEY=你的密钥
 ROBOT_CLIENT_BASE_URL=http://localhost:9000
 ROBOT_CLIENT_TIMEOUT_MS=5000
+CONTROL_SERVICE_BASE_URL=
+CONTROL_SERVICE_TIMEOUT_MS=5000
 ROBOT_ID=4
 LOG_FORMAT=pretty
 ```
+
+`CONTROL_SERVICE_BASE_URL` 留空时，本地运行默认访问 `http://localhost:4001`，Docker Compose 默认访问 `http://host.docker.internal:4001`。需要连接其他地址时再填写完整的 HTTP(S) 地址；同一个值也会覆盖 Compose 默认地址。
 
 ### 2. 安装并启动
 
@@ -209,10 +216,11 @@ docker compose ps
 docker compose logs -f transit-server
 ```
 
-当前 Compose 只部署中转服务。容器通过以下地址访问宿主机上的语音服务：
+当前 Compose 只部署中转服务。容器通过以下地址访问宿主机上的语音服务和控制服务：
 
 ```text
 http://host.docker.internal:9000
+http://host.docker.internal:4001
 ```
 
 详细说明见 [Docker 部署文档](docs/DOCKER_DEPLOYMENT.md)。
@@ -266,6 +274,7 @@ APK 只负责打开 `http://192.168.11.205:4000`，因此安卓设备必须能�
 
 1. 页面或 Android APK 能否访问中转服务 `:4000`；
 2. 中转服务能否访问语音服务 `:9000`；
-3. 语音服务是否按顺序发送开始、增量、结束回调；
-4. 中转服务日志是否出现 `会话开始`、`识别`、`回复+` 或明确异常；
-5. Android 终端和 `192.168.11.205` 是否位于可互通网络。
+3. 中转服务能否访问控制服务 `:4001`；
+4. 语音服务是否按顺序发送开始、增量、结束回调；
+5. 中转服务日志是否出现 `会话开始`、`识别`、`回复+` 或明确异常；
+6. Android 终端和 `192.168.11.205` 是否位于可互通网络。

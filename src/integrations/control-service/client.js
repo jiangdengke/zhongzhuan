@@ -1,18 +1,18 @@
-import { robotClientConfig } from "./config.js";
+import { controlServiceConfig } from "./config.js";
 
-function createRobotClientUrl(pathname) {
-  return new URL(pathname, robotClientConfig.baseUrl).toString();
+function createControlServiceUrl(pathname) {
+  return new URL(pathname, controlServiceConfig.baseUrl).toString();
 }
 
-export function getRobotVoiceSessionControlTarget() {
-  return createRobotClientUrl("/robot/voiceSession/control");
+export function getControlServiceVoiceSessionControlTarget() {
+  return createControlServiceUrl("/robot/voiceSession/control");
 }
 
-function enrichRobotClientError(error, targetUrl, startedAt, timeoutMs) {
+function enrichControlServiceError(error, targetUrl, startedAt, timeoutMs) {
   let requestError = error instanceof Error ? error : new Error(String(error));
 
   if (requestError.name === "AbortError") {
-    const timeoutError = new Error("Voice service request timed out");
+    const timeoutError = new Error("Control service request timed out");
     timeoutError.name = "TimeoutError";
     timeoutError.code = "ETIMEDOUT";
     timeoutError.cause = requestError;
@@ -25,7 +25,10 @@ function enrichRobotClientError(error, targetUrl, startedAt, timeoutMs) {
 
   if (requestError.cause && typeof requestError.cause === "object") {
     for (const propertyName of ["code", "address", "port"]) {
-      if (requestError[propertyName] === undefined && requestError.cause[propertyName] !== undefined) {
+      if (
+        requestError[propertyName] === undefined &&
+        requestError.cause[propertyName] !== undefined
+      ) {
         requestError[propertyName] = requestError.cause[propertyName];
       }
     }
@@ -34,13 +37,13 @@ function enrichRobotClientError(error, targetUrl, startedAt, timeoutMs) {
   return requestError;
 }
 
-export async function sendVoiceSessionControl({ robotId, sessionId, status }) {
+export async function sendControlServiceVoiceSessionControl({ status }) {
   const controller = new AbortController();
-  const targetUrl = getRobotVoiceSessionControlTarget();
+  const targetUrl = getControlServiceVoiceSessionControlTarget();
   const startedAt = Date.now();
   const timeout = setTimeout(() => {
     controller.abort();
-  }, robotClientConfig.timeoutMs);
+  }, controlServiceConfig.timeoutMs);
 
   try {
     const response = await fetch(targetUrl, {
@@ -49,7 +52,7 @@ export async function sendVoiceSessionControl({ robotId, sessionId, status }) {
         Connection: "close",
         "Content-Type": "application/json; charset=utf-8",
       },
-      body: JSON.stringify({ robotId, sessionId, status }),
+      body: JSON.stringify({ status }),
       signal: controller.signal,
       cache: "no-store",
     });
@@ -58,7 +61,7 @@ export async function sendVoiceSessionControl({ robotId, sessionId, status }) {
     await response.text();
 
     if (!response.ok) {
-      const responseError = new Error(`Voice service returned HTTP ${responseStatus}`);
+      const responseError = new Error(`Control service returned HTTP ${responseStatus}`);
       responseError.statusCode = responseStatus;
       throw responseError;
     }
@@ -69,7 +72,12 @@ export async function sendVoiceSessionControl({ robotId, sessionId, status }) {
       durationMs: Date.now() - startedAt,
     };
   } catch (error) {
-    throw enrichRobotClientError(error, targetUrl, startedAt, robotClientConfig.timeoutMs);
+    throw enrichControlServiceError(
+      error,
+      targetUrl,
+      startedAt,
+      controlServiceConfig.timeoutMs,
+    );
   } finally {
     clearTimeout(timeout);
   }

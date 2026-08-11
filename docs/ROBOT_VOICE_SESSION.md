@@ -2,21 +2,23 @@
 
 ## Configuration
 
-Set the voice service HTTP base URL on the transit server:
+Set the voice-service and control-service HTTP base URLs on the transit server:
 
 ```env
 ROBOT_CLIENT_BASE_URL=http://localhost:9000
 ROBOT_CLIENT_TIMEOUT_MS=5000
+CONTROL_SERVICE_BASE_URL=
+CONTROL_SERVICE_TIMEOUT_MS=5000
 ROBOT_ID=4
 ```
 
 The `ROBOT_CLIENT_*` and `ROBOT_ID` names are retained for compatibility with the existing protocol. They identify the separately managed voice service and terminal; they do not mean that the voice service is the robot runtime.
 
-If `ROBOT_CLIENT_BASE_URL` is omitted, the project defaults to `http://localhost:9000` for the current same-server deployment.
+If the base URLs are omitted, the native process defaults to `http://localhost:9000` for the voice service and `http://localhost:4001` for the control service. A blank `CONTROL_SERVICE_BASE_URL` also lets Docker Compose use its `http://host.docker.internal:4001` default; setting a non-empty value overrides the control-service target in both native and Compose runs. Both timeout values default to `5000` milliseconds and must be between `1` and `30000` milliseconds.
 
-The voice service must therefore listen on `localhost:9000`, `127.0.0.1:9000`, or `0.0.0.0:9000`. Binding the voice service only to a specific LAN address does not guarantee that `localhost:9000` will be reachable. If the two services later run in separate containers, replace `localhost` with the voice service container name or another reachable address.
+The voice service must therefore be reachable on port `9000`, and the control service must be reachable on port `4001`. Binding either dependency only to a specific LAN address does not guarantee that its `localhost` default will be reachable. If a dependency later runs on another host or in another container, replace its base URL with a reachable address.
 
-The browser never calls the voice service directly. The transit server forwards the control request so the service address stays out of browser code and cross-origin restrictions do not apply.
+The browser never calls either dependency directly. The transit server forwards both control requests so service addresses stay out of browser code and cross-origin restrictions do not apply.
 
 The internal browser control endpoint accepts only `application/json` and does not grant cross-origin browser access. This keeps cross-site requests behind the browser's CORS preflight while allowing deployments where a reverse proxy rewrites the backend host or request metadata.
 
@@ -36,7 +38,7 @@ On the first microphone click:
 }
 ```
 
-The transit server generates a whole-session ID and forwards this request to the voice service:
+The transit server generates a whole-session ID and forwards the existing request to the voice service unchanged:
 
 ```http
 POST http://<voice-service>:9000/robot/voiceSession/control
@@ -50,7 +52,30 @@ POST http://<voice-service>:9000/robot/voiceSession/control
 }
 ```
 
-The returned `sessionId` stays unchanged until the second click. Silence and `POST /robot/voiceMonitor` do not end this whole session.
+For the same accepted click, the transit server also calls the control service:
+
+```http
+POST http://<control-service>:4001/robot/voiceSession/control
+Content-Type: application/json; charset=utf-8
+```
+
+```json
+{
+  "status": "1"
+}
+```
+
+The control-service body contains exactly the `status` field. It does not receive `robotId` or `sessionId`.
+
+The two outbound requests are attempted concurrently for every accepted start or stop. The whole session becomes active or ended only after both dependencies succeed. The returned `sessionId` stays unchanged until the second click. Silence and `POST /robot/voiceMonitor` do not end this whole session.
+
+If one or both dependencies fail, the page request returns HTTP `502` with one exact business error:
+
+- Voice service only: `语音服务暂时不可用`
+- Control service only: `控制服务暂时不可用`
+- Both services: `语音服务和控制服务暂时不可用`
+
+A failed start retains the generated whole-session ID for the next start attempt but does not expose that pending session to model callbacks, and a failed stop leaves the current session active. Retrying may resend both statuses because repeated voice and control statuses are idempotent.
 
 The customer page uses the centered bottom microphone and the waveform beside the page heading as whole-session indicators. Both are blue before the session starts, change to green immediately after a successful start, and remain green until the user ends the whole session. Listening and processing callbacks can still change the waveform animation and status copy without overriding the active-session green color. The conversation and bottom microphone areas remain transparent so the page background stays visible, while their reserved layout areas prevent the microphone from covering conversation messages.
 
@@ -65,7 +90,7 @@ On the second microphone click, the page sends the stored ID:
 }
 ```
 
-The transit server injects the configured `ROBOT_ID` when forwarding both commands. After a successful stop, it marks that voice session closed and clears its active model-response accumulator and snapshot. Existing messages remain visible in the page.
+The transit server sends the same whole-session ID to the voice service with `status: "0"` and sends exactly `{ "status": "0" }` to the control service. It injects the configured `ROBOT_ID` only into the voice-service request. After both stop requests succeed, it marks that voice session closed and clears its active model-response accumulator and snapshot. Existing messages remain visible in the page.
 
 ## Voice-service model callbacks
 
@@ -145,7 +170,7 @@ ASR partial results continue to replace the current user transcript, but the pag
 
 ## Testing
 
-Start the transit server with the voice service URL configured, then use the page microphone button to create an active whole session. Model callbacks do not need to copy that session ID:
+Start the transit server with both dependency URLs configured, then use the page microphone button to create an active whole session. Model callbacks do not need to copy that session ID:
 
 ```bash
 curl -X POST http://localhost:4000/robot/model/response_monitor \

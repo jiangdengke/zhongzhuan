@@ -1,7 +1,7 @@
 import { logError, logInfo, logWarn, makeTraceId } from "@/shared/logging/logger.js";
 import { readString } from "@/shared/strings.js";
 import { publishRobotEvent } from "./robot-events.js";
-import { readVoiceSession } from "./voice-session-state.js";
+import { readActiveVoiceSession } from "./voice-session-state.js";
 
 const MODEL_RESPONSE_STARTED = "1";
 const MODEL_RESPONSE_ENDED = "0";
@@ -146,7 +146,7 @@ export function handleModelResponseMonitor(payload, options = {}) {
     return createValidationError(traceId, 'status must be "0" or "1"');
   }
 
-  const currentVoiceSession = readVoiceSession(robotId);
+  const currentVoiceSession = readActiveVoiceSession(robotId);
   const wholeSessionId = currentVoiceSession?.sessionId;
 
   if (!wholeSessionId) {
@@ -383,7 +383,7 @@ export function handleModelResponseStream(payload, options = {}) {
     );
   }
 
-  const currentVoiceSession = readVoiceSession(robotId);
+  const currentVoiceSession = readActiveVoiceSession(robotId);
   const wholeSessionId = currentVoiceSession?.sessionId;
 
   if (!wholeSessionId || !content) {

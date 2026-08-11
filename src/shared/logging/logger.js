@@ -55,10 +55,10 @@ const MESSAGE_LABELS = {
     response_sent: "📤 返回页面控制结果",
     session_created: "🆕 创建整段会话",
     session_reused: "🔁 复用整段会话",
-    forward_started: "📤 下发语音控制指令",
-    forward_succeeded: "✅ 语音服务已接收控制指令",
-    control_sending: "📤 下发语音控制指令",
-    control_failed: "❌ 语音服务请求失败",
+    forward_started: "📤 下发会话控制指令",
+    forward_succeeded: "✅ 服务已接收控制指令",
+    control_sending: "📤 下发会话控制指令",
+    control_failed: "❌ 会话控制请求失败",
     started: "✅ 整段会话已进入活动状态",
     ended: "🛑 整段会话已结束",
     state_changed: "🔄 整段会话状态已更新",
@@ -520,6 +520,8 @@ const WARNING_DETAIL_ORDER = [
 
 const ERROR_DETAIL_ORDER = [
   ...WARNING_DETAIL_ORDER,
+  "status",
+  "service",
   "route",
   "statusCode",
   "durationMs",

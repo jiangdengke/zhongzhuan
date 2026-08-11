@@ -691,3 +691,36 @@
 - `docs/ROBOT_VOICE_SESSION.md`: documents pending-tap acknowledgment and the one-tap, one-click control path.
 - `progress.md`: records the reproduced cause, implemented safeguards, and runtime verification evidence.
 - Rollback: restore native button disabling, remove the request-lock and authoritative-session refs, restore the previous pointer-event and touch styles, then remove the related voice-session documentation paragraph and this progress entry.
+
+## 2026-08-11 - Task: forward voice controls to port 4001
+### What was done
+- Added the required control-service request for every accepted whole-session start and stop while preserving the existing page and port-9000 voice-service contracts.
+- Attempted the voice and control dependencies concurrently, advanced active or ended state only after both succeeded, and retained failed-start session reuse for idempotent retries.
+- Added bounded control-service URL and timeout configuration, Docker host-gateway routing, service-specific business failures, and readable dependency-specific operational logs.
+- Updated the repository topology, deployment guidance, and whole-session contract while keeping callbacks available for existing active sessions and preventing pending failed starts from being treated as active; SSE, DeepSeek, page, and Android contracts remain unchanged.
+
+### Testing
+- `npm run build` passed, including production compilation, linting, type validation, static page generation, and route collection.
+- Temporary local voice and control mock servers on isolated high ports plus an isolated production Next.js server verified the exact contracts used for ports `9000` and `4001`: the voice mock received `{robotId, sessionId, status}`, the control mock received exactly `{status}`, both used `Content-Type: application/json; charset=utf-8`, and the voice-service start and stop used the same whole-session ID.
+- The live integration check verified that both dependencies were attempted in the happy path and in voice-only, control-only, and combined failure cases; the page returned the exact three required Chinese errors, and failed start retries reused one whole-session ID while resending both requests.
+- A direct configuration check accepted the `30000` millisecond upper bound and rejected zero, values above `30000`, and non-HTTP(S) control-service URLs.
+- `docker compose config --quiet` and `git diff --check` passed.
+- IDE diagnostics reported no issues for the changed JavaScript source files.
+- A follow-up partial-failure check confirmed that a generated `starting` session is retained for ID reuse but model callbacks are ignored until both dependencies succeed and the session becomes `active`.
+- A delayed duplicate-start check confirmed that an existing active session remains callback-capable while both dependency requests are pending; model start, delta, and completion callbacks were accepted and the same whole-session ID was preserved.
+
+### Notes
+- `.env.example`: added native control-service base URL and timeout examples.
+- `docker-compose.yml`: routes the container to the host control service at `host.docker.internal:4001`.
+- `src/integrations/control-service/config.js`: validates the configurable control-service URL and bounded timeout.
+- `src/integrations/control-service/client.js`: sends the exact status-only control request and records HTTP, duration, timeout, target, and network failure metadata.
+- `src/features/robot/application/voice-session.js`: orchestrates both required dependency calls with `Promise.allSettled` and preserves serialized session and retry semantics.
+- `src/features/robot/application/voice-session-state.js`: exposes only successfully active whole sessions to callback association.
+- `src/features/robot/application/model-response.js`: ignores model callbacks for a pending failed start while preserving callbacks for an existing active session.
+- `src/integrations/robot-client/client.js`: normalizes voice-service request aborts to readable timeout metadata consistently with the control-service client.
+- `src/shared/logging/logger.js`: makes control forwarding labels service-neutral and includes status and service in readable error details.
+- `README.md`: documents the control service in the project structure, topology, configuration, and troubleshooting map.
+- `docs/DOCKER_DEPLOYMENT.md`: documents host port `4001`, Compose routing, firewall requirements, logs, and connectivity checks.
+- `docs/ROBOT_VOICE_SESSION.md`: documents the exact dual-request contract, state transition rule, retries, and business failures.
+- `progress.md`: records the implementation, verification evidence, changed-file scope, and rollback command.
+- Rollback: restore `.env.example`, `README.md`, `docker-compose.yml`, both updated docs, `progress.md`, `model-response.js`, `voice-session-state.js`, `voice-session.js`, `robot-client/client.js`, and `logger.js` from the pre-task revision, then remove `src/integrations/control-service/`.
