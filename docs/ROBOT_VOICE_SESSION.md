@@ -54,6 +54,8 @@ The returned `sessionId` stays unchanged until the second click. Silence and `PO
 
 The customer page uses the centered bottom microphone and the waveform beside the page heading as whole-session indicators. Both are blue before the session starts, change to green immediately after a successful start, and remain green until the user ends the whole session. Listening and processing callbacks can still change the waveform animation and status copy without overriding the active-session green color. The conversation and bottom microphone areas remain transparent so the page background stays visible, while their reserved layout areas prevent the microphone from covering conversation messages.
 
+The microphone remains touch-responsive while a start or stop request is pending. A repeated tap during that interval shows an immediate `请求处理中，请稍候` acknowledgment and interaction pulse, but a synchronous request lock prevents it from sending another control request. Android touch handling uses the normal click path with `touch-action: manipulation`; no parallel touch handler is registered, so one physical tap cannot produce duplicate start or stop calls.
+
 On the second microphone click, the page sends the stored ID:
 
 ```json

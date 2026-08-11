@@ -671,3 +671,23 @@
 - `src/app-home/robot-console-page.js`: places the brand elements, title waveform, and online status on explicit responsive grid rows.
 - `progress.md`: records the hydration and alignment corrections with their verification evidence.
 - Rollback: remove `suppressHydrationWarning` from the root HTML element, restore the previous nested brand wrapper and flex header, then remove this progress entry.
+
+## 2026-08-11 - Task: improve microphone touch responsiveness
+### What was done
+- Kept the microphone interactive while a start or stop request is pending so repeated taps receive immediate busy text and pulse feedback instead of being silently swallowed by native disabled behavior.
+- Added a synchronous request lock that acknowledges pending taps without issuing duplicate control requests.
+- Added a synchronous authoritative session ID so taps at the response-completion boundary still choose the correct start or stop direction before React finishes rendering the new state.
+- Optimized Android touch handling, removed the pointer-event override from the interactive parent, prevented decorative layers from intercepting input, and added an immediate pressed state without introducing a second touch event path.
+
+### Testing
+- `npm run build` passed after the request-lock and authoritative-session changes.
+- A mobile browser simulation with delayed start and stop responses produced four acknowledged clicks but exactly two control requests: one `{status:"1"}` request and one `{status:"0",sessionId:"session-touch-test"}` request.
+- The same simulation confirmed pending feedback, interaction pulse, correct final pressed state, `touch-action: manipulation`, and normal pointer events on both button and parent.
+- `git diff --check` and IDE diagnostics passed, and an independent final review found no actionable defects.
+- No physical Android device was connected; target-device touch feel, multi-touch behavior, and TalkBack announcements remain manual checks.
+
+### Notes
+- `src/app-home/robot-console-page.js`: keeps pending taps responsive, prevents duplicate control requests, tracks the authoritative current session synchronously, and improves Android touch hit handling.
+- `docs/ROBOT_VOICE_SESSION.md`: documents pending-tap acknowledgment and the one-tap, one-click control path.
+- `progress.md`: records the reproduced cause, implemented safeguards, and runtime verification evidence.
+- Rollback: restore native button disabling, remove the request-lock and authoritative-session refs, restore the previous pointer-event and touch styles, then remove the related voice-session documentation paragraph and this progress entry.

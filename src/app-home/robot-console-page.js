@@ -191,6 +191,8 @@ export function RobotConsolePage() {
   const upstreamChatsRef = useRef({});
   const processedRobotEventIdsRef = useRef(new Set());
   const endedVoiceSessionIdsRef = useRef(new Set());
+  const voiceSessionIdRef = useRef("");
+  const voiceSessionRequestLockRef = useRef(false);
 
   useEffect(() => {
     const messagesContainer = messagesContainerRef.current;
@@ -441,47 +443,64 @@ export function RobotConsolePage() {
       : isVoiceSessionActive
         ? "结束会话"
         : "开始会话";
+  const voiceControlAccessibleLabel = voiceSessionRequestState === "starting"
+    ? "正在开启语音会话，请稍候"
+    : voiceSessionRequestState === "stopping"
+      ? "正在结束语音会话，请稍候"
+      : isVoiceSessionActive
+        ? "结束语音会话"
+        : "开始语音会话";
 
   async function handleVoiceAssistantInteraction() {
-    if (isVoiceSessionRequestPending) {
+    if (voiceSessionRequestLockRef.current) {
+      setVoiceControlMessage("请求处理中，请稍候");
+      setInteractionNumber((currentNumber) => currentNumber + 1);
       return;
     }
 
-    const nextStatus = isVoiceSessionActive ? "0" : "1";
-    const nextRequestState = isVoiceSessionActive ? "stopping" : "starting";
+    voiceSessionRequestLockRef.current = true;
+    const activeVoiceSessionId = voiceSessionIdRef.current;
+    const nextStatus = activeVoiceSessionId ? "0" : "1";
+    const nextRequestState = activeVoiceSessionId ? "stopping" : "starting";
+    const pendingControlMessage = activeVoiceSessionId
+      ? "正在结束语音会话"
+      : "正在开启语音会话";
+    const voiceControlRequest = {
+      status: nextStatus,
+      sessionId: activeVoiceSessionId,
+    };
 
     setVoiceSessionRequestState(nextRequestState);
-    setVoiceControlMessage(isVoiceSessionActive ? "正在结束语音会话" : "正在开启语音会话");
+    setVoiceControlMessage(pendingControlMessage);
     setInteractionNumber((currentNumber) => currentNumber + 1);
 
     try {
-      const result = await sendVoiceSessionControl({
-        status: nextStatus,
-        sessionId: voiceSessionId,
-      });
+      const result = await sendVoiceSessionControl(voiceControlRequest);
 
       if (nextStatus === "1") {
         if (!result.sessionId) {
           throw new Error("服务未返回会话标识");
         }
 
+        voiceSessionIdRef.current = result.sessionId;
         setVoiceSessionId(result.sessionId);
         setVoiceControlMessage("语音会话进行中");
         return;
       }
 
-      endedVoiceSessionIdsRef.current.add(voiceSessionId);
+      endedVoiceSessionIdsRef.current.add(activeVoiceSessionId);
 
       if (endedVoiceSessionIdsRef.current.size > 100) {
         const oldestSessionId = endedVoiceSessionIdsRef.current.values().next().value;
         endedVoiceSessionIdsRef.current.delete(oldestSessionId);
       }
 
+      voiceSessionIdRef.current = "";
       setVoiceSessionId("");
       setVoiceAssistantState("ready");
       setVoiceControlMessage("语音会话已结束");
     } catch (error) {
-      const fallbackMessage = isVoiceSessionActive
+      const fallbackMessage = nextStatus === "0"
         ? "结束失败，请再次点击重试"
         : "开启失败，请检查语音服务连接";
 
@@ -489,6 +508,7 @@ export function RobotConsolePage() {
         ? error.message
         : fallbackMessage);
     } finally {
+      voiceSessionRequestLockRef.current = false;
       setVoiceSessionRequestState("idle");
     }
   }
@@ -572,9 +592,9 @@ export function RobotConsolePage() {
               type="button"
               className="voice-assistant-control__button"
               onClick={handleVoiceAssistantInteraction}
-              disabled={isVoiceSessionRequestPending}
+              aria-busy={isVoiceSessionRequestPending}
               aria-pressed={isVoiceSessionActive}
-              aria-label={isVoiceSessionActive ? "结束语音会话" : "开始语音会话"}
+              aria-label={voiceControlAccessibleLabel}
             >
               <span className="voice-assistant-control__halo" aria-hidden="true" />
               {interactionNumber > 0 ? (
@@ -1052,7 +1072,6 @@ export function RobotConsolePage() {
           z-index: 31;
           width: 108px;
           height: 108px;
-          pointer-events: none;
           transform: translate(-50%, -50%);
         }
 
@@ -1073,6 +1092,7 @@ export function RobotConsolePage() {
           white-space: normal;
           overflow-wrap: anywhere;
           box-shadow: 0 8px 20px rgba(35, 101, 165, 0.12);
+          pointer-events: none;
           transform: translateX(-50%);
           animation: voice-assistant-feedback 220ms ease-out both;
         }
@@ -1090,6 +1110,9 @@ export function RobotConsolePage() {
           color: #ffffff;
           cursor: pointer;
           pointer-events: auto;
+          touch-action: manipulation;
+          user-select: none;
+          -webkit-user-select: none;
           box-shadow: 0 14px 30px rgba(35, 101, 165, 0.26);
           -webkit-tap-highlight-color: transparent;
         }
@@ -1099,10 +1122,9 @@ export function RobotConsolePage() {
           outline-offset: 4px;
         }
 
-        .voice-assistant-control__button:disabled {
-          cursor: wait;
-          opacity: 0.72;
-          transform: none;
+        .voice-assistant-control__button[aria-busy="true"] {
+          cursor: progress;
+          opacity: 0.82;
         }
 
         .voice-assistant-control__halo {
@@ -1111,6 +1133,7 @@ export function RobotConsolePage() {
           border: 1px solid rgba(57, 161, 180, 0.28);
           border-radius: 50%;
           animation: voice-assistant-control-breathe 2.8s ease-in-out infinite;
+          pointer-events: none;
         }
 
         .voice-assistant-control__interaction-pulse {
@@ -1127,6 +1150,7 @@ export function RobotConsolePage() {
           z-index: 1;
           width: 50px;
           height: 50px;
+          pointer-events: none;
         }
 
         .voice-assistant-control__sound-wave {
@@ -1177,8 +1201,15 @@ export function RobotConsolePage() {
           border-color: rgba(56, 189, 114, 0.62);
         }
 
-        .voice-assistant-control__button:not(:disabled):hover {
-          transform: translateY(-2px) scale(1.02);
+        @media (hover: hover) and (pointer: fine) {
+          .voice-assistant-control__button:hover {
+            transform: translateY(-2px) scale(1.02);
+          }
+        }
+
+        .voice-assistant-control__button:active {
+          transform: translateY(1px) scale(0.97);
+          filter: brightness(0.94);
         }
 
         @keyframes voice-assistant-control-breathe {
