@@ -262,9 +262,7 @@ export function RobotConsolePage() {
       voiceSessionRobotIdRef.current = "";
       setVoiceSessionId("");
       setVoiceAssistantState("ready");
-      setVoiceControlMessage(isAutomatic
-        ? "长时间未检测到输入，会话已自动结束"
-        : "语音会话已结束");
+      setVoiceControlMessage(isAutomatic ? "" : "语音会话已结束");
     } catch (error) {
       if (isAutomatic) {
         automaticStopFailedSessionIdRef.current = activeVoiceSessionId;
@@ -583,6 +581,8 @@ export function RobotConsolePage() {
   const voiceAssistantCopy = voiceAssistantStatusCopy[voiceAssistantState];
   const isVoiceSessionActive = Boolean(voiceSessionId);
   const isVoiceSessionRequestPending = voiceSessionRequestState !== "idle";
+  const shouldShowVoiceActivationPrompt = !isVoiceSessionActive
+    && !isVoiceSessionRequestPending;
   const voiceControlHint = voiceSessionRequestState === "starting"
     ? "正在开启"
     : voiceSessionRequestState === "stopping"
@@ -743,6 +743,14 @@ export function RobotConsolePage() {
                 {voiceControlHint}
               </span>
             </button>
+            {shouldShowVoiceActivationPrompt ? (
+              <span
+                className="voice-assistant-control__activation-prompt"
+                aria-hidden="true"
+              >
+                点我聊天
+              </span>
+            ) : null}
           </aside>
         </div>
       </section>
@@ -1301,6 +1309,26 @@ export function RobotConsolePage() {
           transform: translateX(-50%);
         }
 
+        .voice-assistant-control__activation-prompt {
+          position: absolute;
+          left: calc(100% + 24px);
+          top: 50%;
+          border: 1px solid rgba(255, 255, 255, 0.58);
+          border-radius: 12px;
+          padding: 7px 14px;
+          background: rgba(17, 52, 73, 0.78);
+          color: #ffffff;
+          font-size: 24px;
+          font-weight: 700;
+          line-height: 1.4;
+          letter-spacing: 0.08em;
+          white-space: nowrap;
+          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.34);
+          box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+          pointer-events: none;
+          transform: translateY(-50%);
+        }
+
         .voice-assistant-control--listening .voice-assistant-control__button {
           background: linear-gradient(145deg, #2fc2ad, #2e8fd0);
           box-shadow: 0 14px 34px rgba(45, 165, 173, 0.34);
@@ -1701,6 +1729,12 @@ export function RobotConsolePage() {
           .voice-assistant-control__hint {
             bottom: -23px;
             width: 92px;
+          }
+
+          .voice-assistant-control__activation-prompt {
+            left: calc(100% + 18px);
+            padding: 6px 11px;
+            font-size: 20px;
           }
         }
 

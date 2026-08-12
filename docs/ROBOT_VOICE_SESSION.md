@@ -109,7 +109,7 @@ On the second microphone click, the page sends the stored ID:
 }
 ```
 
-The transit server sends the same whole-session ID to the voice service with `status: "0"` and sends exactly `{ "status": "0" }` to the control service. It injects the configured `ROBOT_ID` only into the voice-service request. After both stop requests succeed, it marks that voice session closed and clears its active model-response accumulator and snapshot. The page records the ended session, clears its authoritative session ID and React session state, returns the voice assistant to `ready`, and keeps existing messages visible. A timed stop additionally shows exactly `长时间未检测到输入，会话已自动结束`.
+The transit server sends the same whole-session ID to the voice service with `status: "0"` and sends exactly `{ "status": "0" }` to the control service. It injects the configured `ROBOT_ID` only into the voice-service request. After both stop requests succeed, it marks that voice session closed and clears its active model-response accumulator and snapshot. The page records the ended session, clears its authoritative session ID and React session state, returns the voice assistant to `ready`, and keeps existing messages visible. A successful timed stop is silent in the customer-facing interface; the idle microphone instead shows `点我聊天` on its right.
 
 ## Voice-service model callbacks
 
