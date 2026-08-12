@@ -79,7 +79,7 @@ Android APK 全屏页面 ─┘                          └──> DeepSeek
 | 部分 | 负责内容 | 不负责内容 |
 | --- | --- | --- |
 | 页面 | 展示对话、语音状态、流式回复和会话按钮 | 不直接访问语音服务、控制服务或 DeepSeek |
-| 中转服务 | 管理整段会话、同时转发语音和终端行为控制、处理回调、调用 DeepSeek、推送 SSE | 不采集底层音频 |
+| 中转服务 | 管理整段会话、协调语音和终端行为控制、处理回调、调用 DeepSeek、推送 SSE | 不采集底层音频 |
 | 语音服务 | 语音采集、识别、语音状态和语音服务侧模型处理 | 不在本仓库中部署 |
 | 控制服务 | 根据整段会话开始/结束状态暂停或恢复迎宾、巡航和导航行为 | 不接收浏览器或 Android APK 的直接请求 |
 | DeepSeek | 在中转服务需要模型回答时生成文本 | 不直接与页面通信 |
@@ -95,11 +95,12 @@ Android APK 全屏页面 ─┘                          └──> DeepSeek
 页面点击麦克风
   -> POST /api/voice-session/control
   -> 中转服务生成并保存整段 sessionId
-  -> 同时 POST 语音服务 :9000 /robot/voiceSession/control
-  -> 同时 POST 控制服务 :4001 /robot/voiceSession/control
+  -> 同时 HEAD 探测语音服务 :9000 和控制服务 :4001
+  -> 先 POST 控制服务 :4001 /robot/voiceSession/control
+  -> 控制启动成功后 POST 语音服务 :9000 /robot/voiceSession/control
 ```
 
-第一次点击发送 `status: "1"`，第二次点击复用同一个整段 `sessionId` 并发送 `status: "0"`。语音服务继续接收 `{robotId, sessionId, status}`，控制服务只接收 `{status}`；只有两个服务都成功后，整段会话状态才会推进。一次静音或一次说话结束不会自动关闭整段会话。
+第一次点击发送 `status: "1"`，第二次点击复用同一个整段 `sessionId` 并发送 `status: "0"`。开始前的 `HEAD` 只检查进程可达性，不发送状态；任一探测失败时两个服务都不会收到启动 POST。语音服务继续接收 `{robotId, sessionId, status}`，控制服务只接收 `{status}`。启动按“控制服务 -> 语音服务”串行执行，失败时尝试发送 `status: "0"` 补偿；停止仍并发尝试两个服务。只有两个服务都成功后，整段会话状态才会推进。用户一轮说话结束后会进入 60 秒无输入计时，期间没有新的输入才会自动结束整段会话。
 
 ### 2. 识别、固定命令和 DeepSeek 回复
 

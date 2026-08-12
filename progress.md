@@ -752,3 +752,28 @@
 - `docs/ROBOT_VOICE_SESSION.md`: replaces the old silence behavior and documents exact triggers, robot scoping, delayed-event rendering, replay, failure, downstream, and UI contracts.
 - `progress.md`: records the implementation scope, verification evidence, and rollback command.
 - Rollback: run `git restore -- src/app-home/robot-console-page.js docs/ROBOT_VOICE_SESSION.md progress.md` before committing these changes.
+
+## 2026-08-12 - Task: prevent partial voice activation
+### What was done
+- Added concurrent side-effect-free `HEAD` preflight probes for the voice and control dependencies, accepting received statuses as reachable except `500`-`599` other than `501`.
+- Changed startup to run control `status: "1"` before voice `status: "1"`, with zero start POSTs after any failed probe and service-specific errors preserved.
+- Added best-effort startup compensation: control-only after a control start failure, and concurrent voice plus control stops after a voice start failure; compensation failures are logged without replacing the primary error.
+- Preserved pending-session reuse, made duplicate active starts idempotent without downgrading the active phase, and kept manual and automatic stop forwarding concurrent.
+- Updated operational and protocol documentation for the probe, ordered startup, compensation behavior, and remaining distributed-atomicity limitation.
+
+### Testing
+- `npm run build` passed, including production compilation, linting, type validity, page-data collection, and static generation.
+- An isolated Node mock harness passed control and voice connection-level probe failures, dual `5xx` probe failure, zero-start-POST assertions, `404`/`405`/`501` reachability, exact ordered start payloads, active model callbacks, control and voice startup compensation, compensation failure logging with unchanged primary errors, duplicate active start behavior, failed-stop state retention, and concurrent manual/automatic stop paths.
+- `git diff --check` passed.
+- IDE diagnostics reported no errors for all changed JavaScript source files.
+
+### Notes
+- `src/integrations/robot-client/client.js`: added the voice-service `HEAD` probe and shared request/error-enrichment path without changing POST payloads.
+- `src/integrations/control-service/client.js`: added the control-service `HEAD` probe and shared request/error-enrichment path without changing POST payloads.
+- `src/features/robot/application/voice-session.js`: implemented preflight gating, ordered startup, compensation, active duplicate handling, and stage-aware dependency logs while retaining concurrent stop behavior.
+- `src/shared/logging/logger.js`: added readable probe, startup, and compensation labels plus diagnostic stage output.
+- `docs/ROBOT_VOICE_SESSION.md`: documented startup ordering, probe status semantics, compensation, and the distributed-atomicity limitation.
+- `docs/DOCKER_DEPLOYMENT.md`: replaced side-effecting connectivity examples with operational `HEAD` probes and documented their interpretation.
+- `README.md`: corrected the high-level session flow so startup is no longer described as concurrent and stop remains concurrent.
+- `progress.md`: appended this implementation and verification record.
+- Rollback: run `git restore --source=HEAD -- README.md docs/DOCKER_DEPLOYMENT.md docs/ROBOT_VOICE_SESSION.md src/features/robot/application/voice-session.js src/integrations/control-service/client.js src/integrations/robot-client/client.js src/shared/logging/logger.js progress.md` before staging or committing these changes.

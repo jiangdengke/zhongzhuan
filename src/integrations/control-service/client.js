@@ -37,7 +37,11 @@ function enrichControlServiceError(error, targetUrl, startedAt, timeoutMs) {
   return requestError;
 }
 
-export async function sendControlServiceVoiceSessionControl({ status }) {
+function isUnavailableProbeStatus(status) {
+  return status >= 500 && status <= 599 && status !== 501;
+}
+
+async function requestControlServiceVoiceSessionControl({ method, payload }) {
   const controller = new AbortController();
   const targetUrl = getControlServiceVoiceSessionControlTarget();
   const startedAt = Date.now();
@@ -47,20 +51,26 @@ export async function sendControlServiceVoiceSessionControl({ status }) {
 
   try {
     const response = await fetch(targetUrl, {
-      method: "POST",
+      method,
       headers: {
         Connection: "close",
-        "Content-Type": "application/json; charset=utf-8",
+        ...(method === "HEAD" ? { "Cache-Control": "no-store" } : {}),
+        ...(payload ? { "Content-Type": "application/json; charset=utf-8" } : {}),
       },
-      body: JSON.stringify({ status }),
+      body: payload ? JSON.stringify(payload) : undefined,
       signal: controller.signal,
       cache: "no-store",
+      redirect: method === "HEAD" ? "manual" : "follow",
     });
 
     const responseStatus = response.status;
     await response.text();
 
-    if (!response.ok) {
+    const responseIsUnavailable = method === "HEAD"
+      ? isUnavailableProbeStatus(responseStatus)
+      : !response.ok;
+
+    if (responseIsUnavailable) {
       const responseError = new Error(`Control service returned HTTP ${responseStatus}`);
       responseError.statusCode = responseStatus;
       throw responseError;
@@ -81,4 +91,15 @@ export async function sendControlServiceVoiceSessionControl({ status }) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function probeControlServiceVoiceSessionControl() {
+  return requestControlServiceVoiceSessionControl({ method: "HEAD" });
+}
+
+export function sendControlServiceVoiceSessionControl({ status }) {
+  return requestControlServiceVoiceSessionControl({
+    method: "POST",
+    payload: { status },
+  });
 }

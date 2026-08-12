@@ -1,11 +1,13 @@
 import { randomUUID } from "crypto";
 import {
   getControlServiceVoiceSessionControlTarget,
+  probeControlServiceVoiceSessionControl,
   sendControlServiceVoiceSessionControl,
 } from "@/integrations/control-service/client.js";
 import { controlServiceConfig } from "@/integrations/control-service/config.js";
 import {
   getRobotVoiceSessionControlTarget,
+  probeVoiceSessionControl,
   sendVoiceSessionControl,
 } from "@/integrations/robot-client/client.js";
 import { robotClientConfig } from "@/integrations/robot-client/config.js";
@@ -23,6 +25,7 @@ import {
 const VOICE_SESSION_STARTED = "1";
 const VOICE_SESSION_ENDED = "0";
 const VOICE_SESSION_CONTROL_ROUTE = "POST /robot/voiceSession/control";
+const VOICE_SESSION_PROBE_ROUTE = "HEAD /robot/voiceSession/control";
 const VOICE_SERVICE_NAME = "语音服务";
 const CONTROL_SERVICE_NAME = "控制服务";
 
@@ -56,37 +59,280 @@ function createControlFailureMessage({ voiceServiceFailed, controlServiceFailed 
   return voiceServiceFailed ? "语音服务暂时不可用" : "控制服务暂时不可用";
 }
 
+function createVoiceServiceDependency({ robotId, sessionId, status }) {
+  return {
+    service: VOICE_SERVICE_NAME,
+    requestDirection: "中转服务→语音服务",
+    responseDirection: "语音服务→中转服务",
+    target: getRobotVoiceSessionControlTarget(),
+    timeoutMs: robotClientConfig.timeoutMs,
+    probe: probeVoiceSessionControl,
+    send: () => sendVoiceSessionControl({ robotId, sessionId, status }),
+    compensate: () => sendVoiceSessionControl({
+      robotId,
+      sessionId,
+      status: VOICE_SESSION_ENDED,
+    }),
+  };
+}
+
+function createControlServiceDependency({ status }) {
+  return {
+    service: CONTROL_SERVICE_NAME,
+    requestDirection: "中转服务→控制服务",
+    responseDirection: "控制服务→中转服务",
+    target: getControlServiceVoiceSessionControlTarget(),
+    timeoutMs: controlServiceConfig.timeoutMs,
+    probe: probeControlServiceVoiceSessionControl,
+    send: () => sendControlServiceVoiceSessionControl({ status }),
+    compensate: () => sendControlServiceVoiceSessionControl({
+      status: VOICE_SESSION_ENDED,
+    }),
+  };
+}
+
+function logDependencySending(message, {
+  dependency,
+  method,
+  route,
+  robotId,
+  sessionId,
+  stage,
+  status,
+  traceId,
+}) {
+  logInfo("voiceSession", message, {
+    direction: dependency.requestDirection,
+    traceId,
+    route,
+    method,
+    stage,
+    service: dependency.service,
+    robotId,
+    wholeSessionId: sessionId,
+    status,
+    target: dependency.target,
+    timeoutMs: dependency.timeoutMs,
+  });
+}
+
+function logDependencySucceeded(message, {
+  dependency,
+  method,
+  result,
+  robotId,
+  route,
+  sessionId,
+  stage,
+  status,
+  traceId,
+}) {
+  logInfo("voiceSession", message, {
+    direction: dependency.responseDirection,
+    traceId,
+    route,
+    method,
+    stage,
+    service: dependency.service,
+    robotId,
+    wholeSessionId: sessionId,
+    status,
+    statusCode: result.status,
+    target: result.targetUrl,
+    durationMs: result.durationMs,
+    outcome: "已接收",
+  });
+}
+
+function logDependencyFailed(message, {
+  dependency,
+  error,
+  method,
+  robotId,
+  route,
+  sessionId,
+  stage,
+  status,
+  traceId,
+}) {
+  logError("voiceSession", message, {
+    direction: dependency.responseDirection,
+    traceId,
+    route,
+    method,
+    stage,
+    service: dependency.service,
+    robotId,
+    wholeSessionId: sessionId,
+    status,
+    target: error?.targetUrl ?? dependency.target,
+    durationMs: error?.durationMs,
+    timeoutMs: error?.timeoutMs ?? dependency.timeoutMs,
+    statusCode: error?.statusCode,
+    error,
+  });
+}
+
+async function probeStartDependencies({ dependencies, robotId, sessionId, traceId }) {
+  for (const dependency of dependencies) {
+    logDependencySending("probe_sending", {
+      dependency,
+      method: "HEAD",
+      route: VOICE_SESSION_PROBE_ROUTE,
+      robotId,
+      sessionId,
+      stage: "probe",
+      status: VOICE_SESSION_STARTED,
+      traceId,
+    });
+  }
+
+  const probeResults = await Promise.allSettled(
+    dependencies.map((dependency) => dependency.probe()),
+  );
+
+  probeResults.forEach((probeResult, index) => {
+    const dependency = dependencies[index];
+
+    if (probeResult.status === "fulfilled") {
+      logDependencySucceeded("probe_succeeded", {
+        dependency,
+        method: "HEAD",
+        result: probeResult.value,
+        robotId,
+        route: VOICE_SESSION_PROBE_ROUTE,
+        sessionId,
+        stage: "probe",
+        status: VOICE_SESSION_STARTED,
+        traceId,
+      });
+      return;
+    }
+
+    logDependencyFailed("probe_failed", {
+      dependency,
+      error: probeResult.reason,
+      method: "HEAD",
+      robotId,
+      route: VOICE_SESSION_PROBE_ROUTE,
+      sessionId,
+      stage: "probe",
+      status: VOICE_SESSION_STARTED,
+      traceId,
+    });
+  });
+
+  return probeResults;
+}
+
+async function startDependency({ dependency, robotId, sessionId, traceId }) {
+  logDependencySending("startup_sending", {
+    dependency,
+    method: "POST",
+    route: VOICE_SESSION_CONTROL_ROUTE,
+    robotId,
+    sessionId,
+    stage: "startup",
+    status: VOICE_SESSION_STARTED,
+    traceId,
+  });
+
+  try {
+    const result = await dependency.send();
+    logDependencySucceeded("startup_succeeded", {
+      dependency,
+      method: "POST",
+      result,
+      robotId,
+      route: VOICE_SESSION_CONTROL_ROUTE,
+      sessionId,
+      stage: "startup",
+      status: VOICE_SESSION_STARTED,
+      traceId,
+    });
+    return { ok: true };
+  } catch (error) {
+    logDependencyFailed("startup_failed", {
+      dependency,
+      error,
+      method: "POST",
+      robotId,
+      route: VOICE_SESSION_CONTROL_ROUTE,
+      sessionId,
+      stage: "startup",
+      status: VOICE_SESSION_STARTED,
+      traceId,
+    });
+    return { ok: false };
+  }
+}
+
+async function compensateStartDependencies({ dependencies, robotId, sessionId, traceId }) {
+  for (const dependency of dependencies) {
+    logDependencySending("compensation_sending", {
+      dependency,
+      method: "POST",
+      route: VOICE_SESSION_CONTROL_ROUTE,
+      robotId,
+      sessionId,
+      stage: "compensation",
+      status: VOICE_SESSION_ENDED,
+      traceId,
+    });
+  }
+
+  const compensationResults = await Promise.allSettled(
+    dependencies.map((dependency) => dependency.compensate()),
+  );
+
+  compensationResults.forEach((compensationResult, index) => {
+    const dependency = dependencies[index];
+
+    if (compensationResult.status === "fulfilled") {
+      logDependencySucceeded("compensation_succeeded", {
+        dependency,
+        method: "POST",
+        result: compensationResult.value,
+        robotId,
+        route: VOICE_SESSION_CONTROL_ROUTE,
+        sessionId,
+        stage: "compensation",
+        status: VOICE_SESSION_ENDED,
+        traceId,
+      });
+      return;
+    }
+
+    logDependencyFailed("compensation_failed", {
+      dependency,
+      error: compensationResult.reason,
+      method: "POST",
+      robotId,
+      route: VOICE_SESSION_CONTROL_ROUTE,
+      sessionId,
+      stage: "compensation",
+      status: VOICE_SESSION_ENDED,
+      traceId,
+    });
+  });
+}
+
 async function forwardVoiceSessionControl({ robotId, sessionId, status, traceId }) {
   const dependencies = [
-    {
-      service: VOICE_SERVICE_NAME,
-      requestDirection: "中转服务→语音服务",
-      responseDirection: "语音服务→中转服务",
-      target: getRobotVoiceSessionControlTarget(),
-      timeoutMs: robotClientConfig.timeoutMs,
-      send: () => sendVoiceSessionControl({ robotId, sessionId, status }),
-    },
-    {
-      service: CONTROL_SERVICE_NAME,
-      requestDirection: "中转服务→控制服务",
-      responseDirection: "控制服务→中转服务",
-      target: getControlServiceVoiceSessionControlTarget(),
-      timeoutMs: controlServiceConfig.timeoutMs,
-      send: () => sendControlServiceVoiceSessionControl({ status }),
-    },
+    createVoiceServiceDependency({ robotId, sessionId, status }),
+    createControlServiceDependency({ status }),
   ];
 
   for (const dependency of dependencies) {
-    logInfo("voiceSession", "control_sending", {
-      direction: dependency.requestDirection,
-      traceId,
+    logDependencySending("control_sending", {
+      dependency,
+      method: "POST",
       route: VOICE_SESSION_CONTROL_ROUTE,
-      service: dependency.service,
       robotId,
-      wholeSessionId: sessionId,
+      sessionId,
+      stage: "stop",
       status,
-      target: dependency.target,
-      timeoutMs: dependency.timeoutMs,
+      traceId,
     });
   }
 
@@ -98,36 +344,30 @@ async function forwardVoiceSessionControl({ robotId, sessionId, status, traceId 
     const dependency = dependencies[index];
 
     if (dependencyResult.status === "fulfilled") {
-      logInfo("voiceSession", "forward_succeeded", {
-        direction: dependency.responseDirection,
-        traceId,
-        route: VOICE_SESSION_CONTROL_ROUTE,
-        service: dependency.service,
+      logDependencySucceeded("forward_succeeded", {
+        dependency,
+        method: "POST",
+        result: dependencyResult.value,
         robotId,
-        wholeSessionId: sessionId,
+        route: VOICE_SESSION_CONTROL_ROUTE,
+        sessionId,
+        stage: "stop",
         status,
-        statusCode: dependencyResult.value.status,
-        target: dependencyResult.value.targetUrl,
-        durationMs: dependencyResult.value.durationMs,
-        outcome: "已接收",
+        traceId,
       });
       return;
     }
 
-    const error = dependencyResult.reason;
-    logError("voiceSession", "control_failed", {
-      direction: dependency.responseDirection,
-      traceId,
-      route: VOICE_SESSION_CONTROL_ROUTE,
-      service: dependency.service,
+    logDependencyFailed("control_failed", {
+      dependency,
+      error: dependencyResult.reason,
+      method: "POST",
       robotId,
-      wholeSessionId: sessionId,
+      route: VOICE_SESSION_CONTROL_ROUTE,
+      sessionId,
+      stage: "stop",
       status,
-      target: error?.targetUrl ?? dependency.target,
-      durationMs: error?.durationMs,
-      timeoutMs: error?.timeoutMs ?? dependency.timeoutMs,
-      statusCode: error?.statusCode,
-      error,
+      traceId,
     });
   });
 
@@ -162,24 +402,87 @@ async function startVoiceSession({ robotId, traceId }) {
         : "首次点击开始",
   });
 
+  if (isAlreadyActive) {
+    return createResult(200, traceId, {
+      ok: true,
+      robotId,
+      sessionId,
+      status: VOICE_SESSION_STARTED,
+    });
+  }
+
   rememberVoiceSession({
     robotId,
     sessionId,
-    phase: isAlreadyActive ? "active" : "starting",
+    phase: "starting",
     startedAt: currentSession?.startedAt ?? Date.now(),
   });
 
-  const forwardResult = await forwardVoiceSessionControl({
+  const voiceServiceDependency = createVoiceServiceDependency({
     robotId,
     sessionId,
     status: VOICE_SESSION_STARTED,
+  });
+  const controlServiceDependency = createControlServiceDependency({
+    status: VOICE_SESSION_STARTED,
+  });
+  const dependencies = [voiceServiceDependency, controlServiceDependency];
+  const probeResults = await probeStartDependencies({
+    dependencies,
+    robotId,
+    sessionId,
+    traceId,
+  });
+  const voiceServiceProbeFailed = probeResults[0].status === "rejected";
+  const controlServiceProbeFailed = probeResults[1].status === "rejected";
+
+  if (voiceServiceProbeFailed || controlServiceProbeFailed) {
+    return createResult(502, traceId, {
+      ok: false,
+      error: createControlFailureMessage({
+        voiceServiceFailed: voiceServiceProbeFailed,
+        controlServiceFailed: controlServiceProbeFailed,
+      }),
+    });
+  }
+
+  const controlStartResult = await startDependency({
+    dependency: controlServiceDependency,
+    robotId,
+    sessionId,
     traceId,
   });
 
-  if (!forwardResult.ok) {
+  if (!controlStartResult.ok) {
+    await compensateStartDependencies({
+      dependencies: [controlServiceDependency],
+      robotId,
+      sessionId,
+      traceId,
+    });
     return createResult(502, traceId, {
       ok: false,
-      error: forwardResult.error,
+      error: "控制服务暂时不可用",
+    });
+  }
+
+  const voiceStartResult = await startDependency({
+    dependency: voiceServiceDependency,
+    robotId,
+    sessionId,
+    traceId,
+  });
+
+  if (!voiceStartResult.ok) {
+    await compensateStartDependencies({
+      dependencies: [voiceServiceDependency, controlServiceDependency],
+      robotId,
+      sessionId,
+      traceId,
+    });
+    return createResult(502, traceId, {
+      ok: false,
+      error: "语音服务暂时不可用",
     });
   }
 

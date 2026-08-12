@@ -118,25 +118,16 @@ docker compose down --volumes
 
 ## Troubleshooting dependency access
 
-Test host resolution from the running container:
+Test both dependency routes from the running container with the same side-effect-free `HEAD` probe used before session startup:
 
 ```bash
 docker compose exec transit-server \
-  node -e "fetch('http://host.docker.internal:9000/robot/voiceSession/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ robotId: '4', sessionId: 'connectivity-test', status: '0' }) }).then(async (response) => console.log(response.status, await response.text())).catch((error) => { console.error(error); process.exit(1); })"
+  node -e "Promise.allSettled(['http://host.docker.internal:9000/robot/voiceSession/control', 'http://host.docker.internal:4001/robot/voiceSession/control'].map(async (target) => { const response = await fetch(target, { method: 'HEAD', headers: { 'Cache-Control': 'no-store', Connection: 'close' }, cache: 'no-store', redirect: 'manual' }); console.log(target, response.status); if (response.status >= 500 && response.status <= 599 && response.status !== 501) throw new Error(target + ' returned HTTP ' + response.status); })).then((results) => { if (results.some((result) => result.status === 'rejected')) { for (const result of results) if (result.status === 'rejected') console.error(result.reason); process.exit(1); } })"
 ```
 
-This command sends a real stop control request. Use it only when doing an explicit connectivity test with the voice service owner.
+This command does not send a session status or start capture. Any received response normally proves process reachability, including `404`, `405`, or `501` when the dependency does not implement `HEAD`. The transit service treats other `500`-`599` responses as unavailable, and the later startup POST remains the authoritative protocol check.
 
-Test control-service access separately:
-
-```bash
-docker compose exec transit-server \
-  node -e "fetch('http://host.docker.internal:4001/robot/voiceSession/control', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ status: '0' }) }).then(async (response) => console.log(response.status, await response.text())).catch((error) => { console.error(error); process.exit(1); })"
-```
-
-This also sends a real stop status. The control-service body is exactly `{ "status": "0" }`; run it only with the control-service owner approval.
-
-The transit service sends both dependency requests with `Connection: close` and consumes each response body before completing the request. This gives the separately managed services an explicit, orderly connection lifecycle and avoids resetting a reused connection after a successful `200` response.
+The transit service sends probes and control requests with `Connection: close` and `Cache-Control: no-store`, and consumes response bodies where applicable before completing the request. This gives the separately managed services an explicit, orderly connection lifecycle and avoids resetting a reused connection after a successful response.
 
 If either request cannot connect on Linux, verify both listeners on the host:
 

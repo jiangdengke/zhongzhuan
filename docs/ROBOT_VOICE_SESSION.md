@@ -38,7 +38,18 @@ On the first microphone click:
 }
 ```
 
-The transit server generates a whole-session ID and forwards the existing request to the voice service unchanged:
+The transit server generates a whole-session ID, then sends side-effect-free reachability probes to both dependencies concurrently:
+
+```http
+HEAD http://<voice-service>:9000/robot/voiceSession/control
+HEAD http://<control-service>:4001/robot/voiceSession/control
+Cache-Control: no-store
+Connection: close
+```
+
+Any received HTTP status proves process reachability except `500`-`599`; `501 Not Implemented` is the explicit exception because it commonly means that the process is reachable but does not implement `HEAD`. Responses such as `404`, `405`, and `501` therefore allow startup to continue. The later `POST` response remains authoritative. A connection failure, timeout, or other `5xx` response prevents startup, and neither dependency receives a start POST.
+
+After both probes pass, the transit server first starts the control service. Only after that request succeeds does it forward the existing request to the voice service unchanged:
 
 ```http
 POST http://<voice-service>:9000/robot/voiceSession/control
@@ -52,7 +63,7 @@ POST http://<voice-service>:9000/robot/voiceSession/control
 }
 ```
 
-For the same accepted click, the transit server also calls the control service:
+The control-service start request is:
 
 ```http
 POST http://<control-service>:4001/robot/voiceSession/control
@@ -67,7 +78,9 @@ Content-Type: application/json; charset=utf-8
 
 The control-service body contains exactly the `status` field. It does not receive `robotId` or `sessionId`.
 
-The two outbound requests are attempted concurrently for every accepted start or stop. The whole session becomes active or ended only after both dependencies succeed. The returned `sessionId` stays unchanged until the session ends.
+Start requests are intentionally ordered as control service then voice service; stop requests remain best-effort and concurrent. The whole session becomes active only after both start POSTs succeed, and it becomes ended only after both stop POSTs succeed. The returned `sessionId` stays unchanged until the session ends.
+
+If the control-service start POST fails, the transit server does not send the voice-service start POST and attempts an idempotent control-service `status: "0"` compensation. If the voice-service start POST fails, it attempts voice-service and control-service `status: "0"` compensations concurrently so one compensation failure cannot block the other. These compensations cover ambiguous failures where a dependency may have applied a side effect before its response was lost. Compensation outcomes are logged, but a compensation failure never replaces the original service-specific page error.
 
 The successful start response includes the authoritative `robotId` and `sessionId`; the page stores both synchronously for event scoping. While a whole session is active, each live, non-replayed `voice` SSE event with `status: "0"` starts one hidden 60-second inactivity window only when the `robotId` carried by the event matches that stored terminal ID. A later live `voice` event with `status: "1"`, a non-empty `asr_partial`, or any `final_input` cancels the pending timer only when the carried `robotId` matches. Explicitly non-matching terminal events cannot schedule or cancel this page's timer. If a contract-violating successful response omits `robotId`, the page keeps the returned session available for manual stop but disables event-driven waveform changes and automatic inactivity timing for that session. Replayed historical SSE events are ignored for inactivity timing because the event envelope explicitly marks them with `replayed: true`. The page does not display a numeric countdown.
 
@@ -79,7 +92,9 @@ If one or both dependencies fail, the page request returns HTTP `502` with one e
 - Control service only: `控制服务暂时不可用`
 - Both services: `语音服务和控制服务暂时不可用`
 
-A failed start retains the generated whole-session ID for the next start attempt but does not expose that pending session to model callbacks, and a failed stop leaves the current session active. Retrying may resend both statuses because repeated voice and control statuses are idempotent. An automatic stop is attempted only once for the current whole session: if either downstream request fails, the page keeps the microphone active, shows the same service-specific error listed above, schedules no background retry, and waits for a manual stop retry.
+A failed start retains the generated whole-session ID for the next start attempt but does not expose that pending session to model callbacks, and a failed stop leaves the current session active. Retrying may resend statuses because repeated voice and control statuses are idempotent. An automatic stop is attempted only once for the current whole session: if either downstream request fails, the page keeps the microphone active, shows the same service-specific error listed above, schedules no background retry, and waits for a manual stop retry.
+
+The preflight and compensation sequence reduces partial activation but cannot make startup a strict distributed transaction. A dependency can fail after its probe, or it can apply a POST and lose the response; a compensation request can also fail. Strict atomic startup would require both dependency owners to implement a prepare/commit protocol or another shared transaction mechanism.
 
 The customer page uses the centered bottom microphone and the waveform beside the page heading as whole-session indicators. Both are blue before the session starts, change to green immediately after a successful start, and remain green until the user ends the whole session. While the whole session is active, non-ready voice, ASR, final-input, and model-progress events for the current terminal may change the waveform animation and status copy; events from another terminal cannot. After a successful stop, already rendered chat history remains visible. Delayed non-ready events cannot move the waveform from `ready`; ready-completion and error events may still restore `ready`. The conversation and bottom microphone areas remain transparent so the page background stays visible, while their reserved layout areas prevent the microphone from covering conversation messages.
 
